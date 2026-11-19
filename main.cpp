@@ -1,15 +1,18 @@
-// main.cpp – sanity-check driver for all four data structures.
-// All output lives here (UI layer); no cout/cin inside DS implementations.
+// main.cpp – sanity-check driver for all data structures and Graph engine.
+// All output lives here (UI layer); no cout/cin inside DS/Graph implementations.
 
 #include <iostream>
 #include <cassert>
 #include <string>
+#include <vector>
 
 #include "MinHeap.h"
 #include "MaxHeap.h"
 #include "DoublyLinkedList.h"
 #include "UndoStack.h"
 #include "PrefixTrie.h"
+#include "CampusNode.h"
+#include "Graph.h"
 
 // ------------------------------------------------------------------ helpers --
 static void section(const std::string& title) {
@@ -233,17 +236,182 @@ static void testPrefixTrie() {
     ok("autocomplete full word returns exactly itself");
 }
 
+// ============================================== CampusNode OOP & Spatial Graph ===
+static void testCampusGraph() {
+    section("CampusNode OOP Hierarchy & CSV Loading");
+
+    Graph graph;
+    bool loaded = graph.loadGraph("data/nodes.csv", "data/edges.csv");
+    assert(loaded);
+    ok("Loaded data/nodes.csv and data/edges.csv successfully");
+
+    int nodeCount = graph.getNodeCount();
+    assert(nodeCount == 15);
+    std::cout << "  Total campus nodes loaded: " << nodeCount << '\n';
+    ok("Verified 15 campus locations");
+
+    // Verify OOP hierarchy on loaded nodes
+    CampusNode* n0 = graph.getNode(0);
+    assert(n0 != nullptr);
+    assert(n0->getType() == "TRANSIT");
+    assert(n0->getName() == "Main Gate");
+    ok("Node 0 is TransitNode (\"Main Gate\")");
+
+    CampusNode* n2 = graph.getNode(2);
+    assert(n2 != nullptr);
+    assert(n2->getType() == "ACADEMIC");
+    AcademicRoom* roomA = dynamic_cast<AcademicRoom*>(n2);
+    assert(roomA != nullptr);
+    // Schedule for node 2 is 11010011
+    assert(roomA->isSlotBusy(0) == true);
+    assert(roomA->isSlotBusy(1) == true);
+    assert(roomA->isSlotFree(2) == true);
+    assert(roomA->isSlotBusy(3) == true);
+    assert(roomA->isSlotFree(4) == true);
+    assert(roomA->isSlotFree(5) == true);
+    assert(roomA->isSlotBusy(6) == true);
+    assert(roomA->isSlotBusy(7) == true);
+    // Hour 10 is slot 2 (10 - 8 = 2) -> free
+    assert(roomA->isAvailableAtHour(10) == true);
+    // Hour 8 is slot 0 (8 - 8 = 0) -> busy
+    assert(roomA->isAvailableAtHour(8) == false);
+    ok("Node 2 is AcademicRoom with 8-slot schedule & availability helpers verified");
+
+    CampusNode* n7 = graph.getNode(7);
+    assert(n7 != nullptr);
+    assert(n7->getType() == "SERVICE");
+    ServiceFacility* lib = dynamic_cast<ServiceFacility*>(n7);
+    assert(lib != nullptr);
+    assert(lib->getCurrentQueue() >= 0);
+    assert(lib->getAvgServiceMinutes() > 0);
+    int wait = lib->getEstimatedWaitMinutes();
+    assert(wait == lib->getCurrentQueue() * lib->getAvgServiceMinutes());
+    ok("Node 7 is ServiceFacility with queue and wait time helpers verified");
+
+    // ---- PrefixTrie Integration ----
+    section("PrefixTrie Integrated with Campus Nodes");
+    PrefixTrie campusTrie;
+    for (int i = 0; i < nodeCount; ++i) {
+        CampusNode* node = graph.getNode(i);
+        if (node) {
+            campusTrie.insert(node->getName(), node->getId());
+        }
+    }
+    assert(campusTrie.searchExact("Academic Block A") == 2);
+    assert(campusTrie.searchExact("library") == 7);
+    auto labMatches = campusTrie.autocomplete("cs");
+    assert(labMatches.size() == 2); // CS Lab One and CS Lab Two
+    std::cout << "  Prefix autocomplete(\"cs\") on loaded campus:\n";
+    for (auto& [k, id] : labMatches) {
+        std::cout << "    [" << id << "] " << graph.getNode(id)->getName() << '\n';
+    }
+    ok("PrefixTrie correctly indexes and autocompletes real campus locations");
+
+    // ---- Dijkstra Pathfinding: Normal vs AvoidSun ----
+    section("Dijkstra: Normal vs Sun Avoidance (Heatwave Routing)");
+    // Route from Central Plaza (1) to Academic Block A (2)
+    // Direct outdoor edge: 1 -> 2 (distance = 60.0, isOutdoor = 1)
+    // Indoor route: 1 -> Main Corridor (12, 40m) -> Academic Block A (2, 25m) = 65m total
+    
+    // Normal query (avoidSun = false, morning hour 9)
+    PathResult normalRes = graph.dijkstra(1, 2, 9, false);
+    std::cout << "  Normal route (1 -> 2, avoidSun=false, hour=9):\n    Path: ";
+    for (int id : normalRes.path) std::cout << graph.getNode(id)->getName() << " (" << id << ") -> ";
+    std::cout << "Total Cost = " << normalRes.totalCost << "m\n";
+    assert(normalRes.path.size() == 2);
+    assert(normalRes.path[0] == 1 && normalRes.path[1] == 2);
+    assert(normalRes.totalCost == 60.0);
+    ok("Normal Dijkstra chooses direct outdoor path (60m)");
+
+    // Sun avoidance query (avoidSun = true, morning hour 9)
+    // Direct path gets 2.5x penalty: 60 * 2.5 = 150m
+    // Indoor path via Main Corridor (12) stays 40 + 25 = 65m
+    PathResult shadedRes = graph.dijkstra(1, 2, 9, true);
+    std::cout << "  Shaded route (1 -> 2, avoidSun=true, hour=9):\n    Path: ";
+    for (int id : shadedRes.path) std::cout << graph.getNode(id)->getName() << " (" << id << ") -> ";
+    std::cout << "Total Cost = " << shadedRes.totalCost << "m\n";
+    assert(shadedRes.path.size() == 3);
+    assert(shadedRes.path[0] == 1 && shadedRes.path[1] == 12 && shadedRes.path[2] == 2);
+    assert(shadedRes.totalCost == 65.0);
+    ok("avoidSun=true reroutes via indoor corridors (Main Corridor, 65m vs 150m penalized)");
+
+    // Rush hour query (currentHour = 12, peak 11-14)
+    // Direct path: 60 * 1.5 rushMultiplier = 90m
+    // Indoor path: 40 * 1.3 (52m) + 25 * 1.3 (32.5m) = 84.5m
+    PathResult rushRes = graph.dijkstra(1, 2, 12, false);
+    std::cout << "  Peak-hour route (1 -> 2, avoidSun=false, hour=12):\n    Path: ";
+    for (int id : rushRes.path) std::cout << graph.getNode(id)->getName() << " (" << id << ") -> ";
+    std::cout << "Total Cost = " << rushRes.totalCost << "m\n";
+    assert(rushRes.totalCost == 84.5);
+    ok("Peak hour multiplier (11-14) correctly adjusts edge weights");
+
+    // ---- Squad-Sync Meetup Point ----
+    section("Squad-Sync (3-User Collective Travel Optimization)");
+    // 3 students at different campus points:
+    // User 1: CS Lab One (5)
+    // User 2: EE Block (4)
+    // User 3: Cafeteria (9)
+    std::vector<int> squad = {5, 4, 9};
+    MeetupResult meetup = graph.findSquadMeetup(squad, 10, false);
+    assert(meetup.meetupNodeId >= 0);
+    std::cout << "  Squad members at:\n";
+    for (size_t i = 0; i < squad.size(); ++i) {
+        std::cout << "    User " << (i + 1) << ": " << graph.getNode(squad[i])->getName()
+                  << " (Cost to meetup: " << meetup.userCosts[i] << "m)\n";
+    }
+    std::cout << "  Optimal Meetup Node: [" << meetup.meetupNodeId << "] "
+              << graph.getNode(meetup.meetupNodeId)->getName() << '\n';
+    std::cout << "  Total Collective Cost: " << meetup.totalCollectiveCost << "m\n";
+    ok("Squad-Sync identified optimal collective meetup vertex");
+
+    // ---- Errand Optimization (Permutations) ----
+    section("Errand Tour Optimization (Permutations)");
+    // Student starts at Main Gate (0), needs to visit Dhaba (8), Library (7), and Sports Room (10),
+    // and finish class at CS Lab Two (6).
+    int startNode = 0;
+    int endNode = 6;
+    std::vector<int> errands = {8, 7, 10};
+
+    ErrandResult errandTour = graph.optimizeErrands(startNode, endNode, errands, 10, false);
+    assert(!errandTour.visitOrder.empty());
+    assert(errandTour.visitOrder.front() == startNode);
+    assert(errandTour.visitOrder.back() == endNode);
+
+    std::cout << "  Start: " << graph.getNode(startNode)->getName() << " (0)\n";
+    std::cout << "  End:   " << graph.getNode(endNode)->getName() << " (6)\n";
+    std::cout << "  Errands to visit: Dhaba (8), Library (7), Sports Room (10)\n";
+    std::cout << "  Optimal Visit Order:\n    ";
+    for (size_t i = 0; i < errandTour.visitOrder.size(); ++i) {
+        std::cout << graph.getNode(errandTour.visitOrder[i])->getName()
+                  << " (" << errandTour.visitOrder[i] << ")";
+        if (i + 1 < errandTour.visitOrder.size()) std::cout << " -> ";
+    }
+    std::cout << "\n  Complete Step-by-Step Path:\n    ";
+    for (size_t i = 0; i < errandTour.fullPath.size(); ++i) {
+        std::cout << graph.getNode(errandTour.fullPath[i])->getName();
+        if (i + 1 < errandTour.fullPath.size()) std::cout << " -> ";
+    }
+    std::cout << "\n  Total Tour Cost: " << errandTour.totalCost << "m\n";
+    ok("Errand tour tested permutations and produced shortest complete journey");
+}
+
 // ===================================================================== main ===
 int main() {
-    std::cout << "Campus-Sync – Data Structure Sanity Checks\n";
-    std::cout << "===========================================\n";
+    std::cout << "========================================================\n";
+    std::cout << "        Campus-Sync – Comprehensive System Verification\n";
+    std::cout << "========================================================\n";
 
+    // Milestone 1 Core Data Structures
     testMinHeap();
     testMaxHeap();
     testDLLAndUndoStack();
     testPrefixTrie();
 
-    std::cout << "\n===========================================\n";
-    std::cout << "All sanity checks passed. Zero crashes.\n";
+    // Milestone 2 Campus Data & Spatial Graph Engine
+    testCampusGraph();
+
+    std::cout << "\n========================================================\n";
+    std::cout << "  All system verification checks passed. Zero crashes.\n";
+    std::cout << "========================================================\n";
     return 0;
 }
