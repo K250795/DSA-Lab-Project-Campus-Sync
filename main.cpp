@@ -292,6 +292,21 @@ static void testDLLAndUndoStack() {
     assert(undo.empty());
     ok("UndoStack LIFO order and deep-copy semantics verified");
 
+    // clear(): empties a non-empty stack, is safe on an empty one, and the
+    // stack is reusable afterwards.
+    undo.push(restored1);
+    undo.push(restored2);
+    undo.push(restored3);
+    assert(undo.size() == 3);
+    undo.clear();
+    assert(undo.empty() && undo.size() == 0);
+    undo.clear();                                   // no-op on empty stack
+    assert(undo.empty());
+    undo.push(restored2);                           // reusable after clear
+    assert(undo.size() == 1 && undo.top().size() == 2);
+    undo.clear();
+    ok("clear() empties the stack, is idempotent, and allows reuse");
+
     // Copy-assignment operator test.
     DoublyLinkedList dst;
     dst = copy;   // copy has 4 items

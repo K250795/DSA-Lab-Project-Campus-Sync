@@ -33,6 +33,9 @@ public:
     // Inspect the top snapshot without removing it.
     const DoublyLinkedList& top() const;
 
+    // Delete every snapshot and leave the stack empty (safe to reuse).
+    void clear();
+
     bool empty() const { return top_ == nullptr; }
     int  size()  const { return size_; }
 

@@ -7,15 +7,22 @@ UndoStack::UndoStack()
 
 // ------------------------------------------------------------- destructor ---
 UndoStack::~UndoStack() {
-    // Walk the linked chain and delete every StackNode.
-    // The DoublyLinkedList member inside each StackNode is destroyed
-    // automatically by its own destructor (Rule of Three).
+    clear();
+}
+
+// ------------------------------------------------------------------ clear ---
+// Walk the linked chain and delete every StackNode.
+// The DoublyLinkedList member inside each StackNode is destroyed
+// automatically by its own destructor (Rule of Three).
+void UndoStack::clear() {
     StackNode* cur = top_;
     while (cur != nullptr) {
         StackNode* below = cur->below;
         delete cur;
         cur = below;
     }
+    top_  = nullptr;
+    size_ = 0;
 }
 
 // ------------------------------------------------------------------- push ---
