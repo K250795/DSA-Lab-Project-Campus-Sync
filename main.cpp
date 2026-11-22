@@ -11,6 +11,7 @@
 #include "MaxHeap.h"
 #include "DoublyLinkedList.h"
 #include "UndoStack.h"
+#include "Scheduler.h"
 #include "PrefixTrie.h"
 #include "CampusNode.h"
 #include "Graph.h"
@@ -316,6 +317,102 @@ static void testDLLAndUndoStack() {
     ok("Copy-assignment operator: independent after assign");
 }
 
+// ================================================================ Scheduler ===
+// Collect titles in list order, e.g. "CS101 Lecture|Lab Session".
+static std::string titlesOf(const DoublyLinkedList& list) {
+    std::string out;
+    for (DLLNode* cur = list.head(); cur != nullptr; cur = cur->next) {
+        if (!out.empty()) out += '|';
+        out += cur->data.title;
+    }
+    return out;
+}
+
+static void testScheduler() {
+    section("Scheduler (auto-snapshot, undo, redo)");
+
+    Scheduler sched;
+    assert(sched.getSchedule().empty());
+    assert(!sched.undo() && !sched.redo());
+    ok("Empty scheduler: undo()/redo() return false");
+
+    ScheduleItem lecture{"CS101 Lecture", timeToMinutes("08:00"), timeToMinutes("09:30"), 2};  // Academic Block A
+    ScheduleItem lab    {"Lab Session",   timeToMinutes("13:00"), timeToMinutes("15:00"), 5};  // CS Lab One
+    ScheduleItem math   {"Math Tutorial", timeToMinutes("10:00"), timeToMinutes("11:00"), 3};  // Academic Block B
+    ScheduleItem clash  {"Group Meeting", timeToMinutes("09:00"), timeToMinutes("10:30"), 7};  // Library
+    ScheduleItem library{"Library Visit", timeToMinutes("11:00"), timeToMinutes("12:00"), 7};  // Library
+
+    // Adds keep start-time order regardless of insertion order.
+    assert(sched.addEvent(lab));
+    assert(sched.addEvent(lecture));
+    assert(sched.addEvent(math));
+    assert(titlesOf(sched.getSchedule()) == "CS101 Lecture|Math Tutorial|Lab Session");
+    ok("addEvent inserts in start-time order");
+
+    // Overlap and invalid ranges are rejected and leave everything untouched.
+    assert(!sched.addEvent(clash));                              // overlaps lecture + math
+    ScheduleItem empty{"Zero Length", timeToMinutes("12:00"), timeToMinutes("12:00"), 7};
+    ScheduleItem reversed{"Backwards", timeToMinutes("12:30"), timeToMinutes("12:15"), 7};
+    assert(!sched.addEvent(empty));
+    assert(!sched.addEvent(reversed));
+    assert(!sched.removeEvent("No Such Event"));
+    assert(sched.getSchedule().size() == 3);
+    assert(sched.getSchedule().findByTitle("Group Meeting") == nullptr);
+    ok("Overlapping / zero-length / reversed adds and unknown removes rejected");
+
+    // Back-to-back events touch but do not overlap.
+    assert(sched.addEvent(library));                             // 11:00, right after math
+    assert(sched.removeEvent("Math Tutorial"));
+    assert(titlesOf(sched.getSchedule()) == "CS101 Lecture|Library Visit|Lab Session");
+    ok("Back-to-back add accepted; removeEvent removes by title");
+
+    // Undo walks back one successful edit at a time; rejected edits left no snapshots.
+    assert(sched.undo());                                        // undo remove math
+    assert(titlesOf(sched.getSchedule()) == "CS101 Lecture|Math Tutorial|Library Visit|Lab Session");
+    assert(sched.undo());                                        // undo add library
+    assert(titlesOf(sched.getSchedule()) == "CS101 Lecture|Math Tutorial|Lab Session");
+    assert(sched.undo());                                        // undo add math
+    assert(sched.undo());                                        // undo add lecture
+    assert(titlesOf(sched.getSchedule()) == "Lab Session");
+    assert(sched.undo());                                        // undo add lab
+    assert(sched.getSchedule().empty());
+    assert(!sched.undo());                                       // exactly 5 snapshots
+    ok("undo() restores each prior state; only successful edits were snapshotted");
+
+    // Redo replays forward through the same states.
+    assert(sched.redo());
+    assert(titlesOf(sched.getSchedule()) == "Lab Session");
+    assert(sched.redo() && sched.redo());
+    assert(titlesOf(sched.getSchedule()) == "CS101 Lecture|Math Tutorial|Lab Session");
+    assert(sched.undo());                                        // undo/redo interleave
+    assert(sched.redo());
+    assert(titlesOf(sched.getSchedule()) == "CS101 Lecture|Math Tutorial|Lab Session");
+    ok("redo() re-applies undone edits; undo/redo interleave correctly");
+
+    // A rejected edit keeps the redo history.
+    assert(!sched.addEvent(clash));
+    assert(sched.redo());                                        // re-add library
+    assert(titlesOf(sched.getSchedule()) == "CS101 Lecture|Math Tutorial|Library Visit|Lab Session");
+    ok("Rejected edit does not clear redo history");
+
+    // A new successful edit clears the redo history.
+    assert(sched.undo());                                        // redo now available
+    ScheduleItem gym{"Sports Practice", timeToMinutes("16:00"), timeToMinutes("17:00"), 10};  // Sports Room
+    assert(sched.addEvent(gym));                                 // new timeline
+    assert(!sched.redo());
+    assert(titlesOf(sched.getSchedule()) == "CS101 Lecture|Math Tutorial|Lab Session|Sports Practice");
+    assert(sched.undo());                                        // the new edit is undoable
+    assert(titlesOf(sched.getSchedule()) == "CS101 Lecture|Math Tutorial|Lab Session");
+    ok("New edit after undo clears redo stack; the new edit is itself undoable");
+
+    std::cout << "  Final schedule:\n";
+    for (DLLNode* cur = sched.getSchedule().head(); cur != nullptr; cur = cur->next)
+        std::cout << "    " << cur->data.title << " ["
+                  << minutesToTime(cur->data.startMin) << " - "
+                  << minutesToTime(cur->data.endMin) << "] @ node "
+                  << cur->data.locationId << '\n';
+}
+
 // ================================================================ PrefixTrie ===
 static void testPrefixTrie() {
     section("PrefixTrie");
@@ -534,6 +631,7 @@ int main() {
     testMinHeap();
     testMaxHeap();
     testDLLAndUndoStack();
+    testScheduler();
     testPrefixTrie();
 
     // Milestone 2 Campus Data & Spatial Graph Engine
