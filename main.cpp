@@ -209,6 +209,22 @@ static void testDLLAndUndoStack() {
     assert(sorted.empty() && sorted.head() == nullptr && sorted.tail() == nullptr);
     ok("findByTitle / removeByTitle (head, middle, tail, miss, empty)");
 
+    // Overlap check against 'schedule' (Office Hours was removed above, so it is
+    // CS101 08:00-09:30, Math Tutorial 10:00-11:00, Lab Session 13:00-15:00).
+    auto mk = [](const char* s, const char* e) {
+        return ScheduleItem{"Probe", timeToMinutes(s), timeToMinutes(e), 0};
+    };
+    assert(schedule.findOverlap(mk("09:00", "09:45")) == n1);  // partial overlap
+    assert(schedule.hasOverlap(mk("13:30", "14:00")));          // fully inside
+    assert(schedule.hasOverlap(mk("12:00", "16:00")));          // fully covers
+    assert(!schedule.hasOverlap(mk("11:00", "13:00")));         // fills the gap exactly
+    assert(!schedule.hasOverlap(mk("07:00", "08:00")));         // ends as first starts
+    assert(!schedule.hasOverlap(mk("15:00", "16:00")));         // starts as last ends
+    assert(!DoublyLinkedList().hasOverlap(mk("08:00", "09:00"))); // empty list
+    assert(itemsOverlap(mk("08:00", "09:00"), mk("08:30", "10:00")));
+    assert(!itemsOverlap(mk("08:00", "09:00"), mk("09:00", "10:00")));
+    ok("Overlap check: partial / inside / covering clash; touching edges do not");
+
     // Print remaining items.
     std::cout << "  Schedule after remove:\n";
     for (DLLNode* cur = schedule.head(); cur != nullptr; cur = cur->next)

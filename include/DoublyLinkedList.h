@@ -19,6 +19,10 @@ int timeToMinutes(const std::string& hhmm);
 // Throws std::invalid_argument if minutes is outside [0, 1439].
 std::string minutesToTime(int minutes);
 
+// True if two items' time ranges clash.  Ranges are half-open [start, end),
+// so an event ending at 09:30 does NOT clash with one starting at 09:30.
+bool itemsOverlap(const ScheduleItem& a, const ScheduleItem& b);
+
 // Internal doubly-linked node.
 struct DLLNode {
     ScheduleItem data;
@@ -71,6 +75,13 @@ public:
     // Remove the first node whose title matches exactly.
     // Returns true if a node was removed, false if no match was found.
     bool removeByTitle(const std::string& title);
+
+    // Return the first existing node whose time range clashes with 'item',
+    // or nullptr if 'item' fits without conflict.
+    DLLNode* findOverlap(const ScheduleItem& item) const;
+
+    // Convenience wrapper: true if 'item' clashes with any existing node.
+    bool hasOverlap(const ScheduleItem& item) const { return findOverlap(item) != nullptr; }
 
     // Remove and destroy all nodes.
     void clear();

@@ -38,6 +38,13 @@ std::string minutesToTime(int minutes) {
     return out;
 }
 
+// ----------------------------------------------------------- itemsOverlap ---
+// Two half-open ranges [aStart, aEnd) and [bStart, bEnd) intersect exactly
+// when each one starts before the other one ends.
+bool itemsOverlap(const ScheduleItem& a, const ScheduleItem& b) {
+    return a.startMin < b.endMin && b.startMin < a.endMin;
+}
+
 // ----------------------------------------------------------- constructor ---
 DoublyLinkedList::DoublyLinkedList()
     : head_(nullptr), tail_(nullptr), size_(0) {}
@@ -168,6 +175,16 @@ void DoublyLinkedList::remove(DLLNode* node) {
 DLLNode* DoublyLinkedList::findByTitle(const std::string& title) const {
     for (DLLNode* cur = head_; cur != nullptr; cur = cur->next)
         if (cur->data.title == title)
+            return cur;
+    return nullptr;
+}
+
+// ----------------------------------------------------------- findOverlap ---
+// Checks every node: pushBack / pushFront / insertAfter do not guarantee
+// sorted order, so an early exit on start time would not be safe here.
+DLLNode* DoublyLinkedList::findOverlap(const ScheduleItem& item) const {
+    for (DLLNode* cur = head_; cur != nullptr; cur = cur->next)
+        if (itemsOverlap(cur->data, item))
             return cur;
     return nullptr;
 }
