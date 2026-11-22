@@ -1,5 +1,42 @@
 #include "DoublyLinkedList.h"
 #include <stdexcept>
+#include <cctype>    // std::isdigit
+
+// ---------------------------------------------------------- timeToMinutes ---
+// Parses exactly "HH:MM" (two digits, colon, two digits).
+int timeToMinutes(const std::string& hhmm) {
+    if (hhmm.size() != 5 || hhmm[2] != ':')
+        throw std::invalid_argument("timeToMinutes: expected \"HH:MM\"");
+
+    const int digitPos[] = {0, 1, 3, 4};
+    for (int pos : digitPos)
+        if (!std::isdigit(static_cast<unsigned char>(hhmm[pos])))
+            throw std::invalid_argument("timeToMinutes: non-digit in time");
+
+    int hours   = (hhmm[0] - '0') * 10 + (hhmm[1] - '0');
+    int minutes = (hhmm[3] - '0') * 10 + (hhmm[4] - '0');
+    if (hours > 23 || minutes > 59)
+        throw std::invalid_argument("timeToMinutes: time out of range");
+
+    return hours * 60 + minutes;
+}
+
+// ---------------------------------------------------------- minutesToTime ---
+// Builds a zero-padded "HH:MM" string by hand (no stream formatting).
+std::string minutesToTime(int minutes) {
+    if (minutes < 0 || minutes >= 24 * 60)
+        throw std::invalid_argument("minutesToTime: minutes out of range");
+
+    int hours = minutes / 60;
+    int mins  = minutes % 60;
+
+    std::string out = "00:00";
+    out[0] = static_cast<char>('0' + hours / 10);
+    out[1] = static_cast<char>('0' + hours % 10);
+    out[3] = static_cast<char>('0' + mins / 10);
+    out[4] = static_cast<char>('0' + mins % 10);
+    return out;
+}
 
 // ----------------------------------------------------------- constructor ---
 DoublyLinkedList::DoublyLinkedList()

@@ -5,6 +5,7 @@
 #include <cassert>
 #include <string>
 #include <vector>
+#include <stdexcept>
 
 #include "MinHeap.h"
 #include "MaxHeap.h"
@@ -98,9 +99,27 @@ static void testDLLAndUndoStack() {
     DoublyLinkedList schedule;
     assert(schedule.empty());
 
-    ScheduleItem e1{"CS101 Lecture",    "08:00", "09:30", 101};
-    ScheduleItem e2{"Math Tutorial",    "10:00", "11:00", 102};
-    ScheduleItem e3{"Lab Session",      "13:00", "15:00", 103};
+    // Time conversion helpers.
+    assert(timeToMinutes("00:00") == 0);
+    assert(timeToMinutes("08:30") == 510);
+    assert(timeToMinutes("23:59") == 1439);
+    assert(minutesToTime(510) == "08:30");
+    assert(minutesToTime(0) == "00:00");
+    assert(minutesToTime(timeToMinutes("13:05")) == "13:05");
+    bool threw = false;
+    try { timeToMinutes("24:00"); } catch (const std::invalid_argument&) { threw = true; }
+    assert(threw);
+    threw = false;
+    try { timeToMinutes("8:30"); } catch (const std::invalid_argument&) { threw = true; }
+    assert(threw);
+    threw = false;
+    try { minutesToTime(1440); } catch (const std::invalid_argument&) { threw = true; }
+    assert(threw);
+    ok("timeToMinutes / minutesToTime round-trip and reject bad input");
+
+    ScheduleItem e1{"CS101 Lecture", timeToMinutes("08:00"), timeToMinutes("09:30"), 101};
+    ScheduleItem e2{"Math Tutorial", timeToMinutes("10:00"), timeToMinutes("11:00"), 102};
+    ScheduleItem e3{"Lab Session",   timeToMinutes("13:00"), timeToMinutes("15:00"), 103};
 
     DLLNode* n1 = schedule.pushBack(e1);
     DLLNode* n2 = schedule.pushBack(e2);
@@ -109,7 +128,7 @@ static void testDLLAndUndoStack() {
     ok("pushBack 3 items");
 
     // Insert between n1 and n2.
-    ScheduleItem e4{"Office Hours", "09:30", "10:00", 104};
+    ScheduleItem e4{"Office Hours", timeToMinutes("09:30"), timeToMinutes("10:00"), 104};
     DLLNode* n4 = schedule.insertAfter(n1, e4);
     assert(schedule.size() == 4);
     // Order: n1 -> n4 -> n2 -> n3
@@ -136,7 +155,8 @@ static void testDLLAndUndoStack() {
     std::cout << "  Schedule after remove:\n";
     for (DLLNode* cur = schedule.head(); cur != nullptr; cur = cur->next)
         std::cout << "    " << cur->data.title << " ["
-                  << cur->data.startTime << " - " << cur->data.endTime << "]\n";
+                  << minutesToTime(cur->data.startMin) << " - "
+                  << minutesToTime(cur->data.endMin) << "]\n";
 
     // ---- UndoStack ----
     section("UndoStack");

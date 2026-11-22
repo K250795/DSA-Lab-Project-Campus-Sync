@@ -2,12 +2,22 @@
 #include <string>
 
 // A single schedule event stored inside the doubly linked list.
+// Times are stored as minutes since midnight (e.g. 08:30 -> 510) so that
+// ordering and overlap checks are plain integer comparisons.
 struct ScheduleItem {
     std::string title;
-    std::string startTime;   // e.g. "08:00"
-    std::string endTime;     // e.g. "09:30"
+    int         startMin;    // start time, minutes since midnight [0, 1439]
+    int         endMin;      // end time,   minutes since midnight [0, 1439]
     int         locationId;  // references a campus node id
 };
+
+// Convert "HH:MM" (24-hour, e.g. "08:30") to minutes since midnight.
+// Throws std::invalid_argument on malformed or out-of-range input.
+int timeToMinutes(const std::string& hhmm);
+
+// Convert minutes since midnight to zero-padded "HH:MM".
+// Throws std::invalid_argument if minutes is outside [0, 1439].
+std::string minutesToTime(int minutes);
 
 // Internal doubly-linked node.
 struct DLLNode {
