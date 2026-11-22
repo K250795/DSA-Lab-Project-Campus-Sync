@@ -77,6 +77,40 @@ DLLNode* DoublyLinkedList::pushBack(const ScheduleItem& item) {
     return node;
 }
 
+// -------------------------------------------------------------- pushFront ---
+DLLNode* DoublyLinkedList::pushFront(const ScheduleItem& item) {
+    DLLNode* node = new DLLNode(item);
+    if (head_ == nullptr) {
+        // List is empty: new node becomes both head and tail.
+        head_ = tail_ = node;
+    } else {
+        node->next  = head_;
+        head_->prev = node;
+        head_       = node;
+    }
+    ++size_;
+    return node;
+}
+
+// ---------------------------------------------------------- insertBefore ---
+DLLNode* DoublyLinkedList::insertBefore(DLLNode* node, const ScheduleItem& item) {
+    if (node == nullptr)
+        throw std::invalid_argument("DoublyLinkedList::insertBefore: null node");
+
+    DLLNode* newNode = new DLLNode(item);
+    newNode->next    = node;
+    newNode->prev    = node->prev;
+
+    if (node->prev != nullptr)
+        node->prev->next = newNode;
+    else
+        head_ = newNode;   // inserting before the current head
+
+    node->prev = newNode;
+    ++size_;
+    return newNode;
+}
+
 // ----------------------------------------------------------- insertAfter ---
 DLLNode* DoublyLinkedList::insertAfter(DLLNode* node, const ScheduleItem& item) {
     if (node == nullptr)
@@ -107,18 +141,7 @@ DLLNode* DoublyLinkedList::insertSorted(const ScheduleItem& item) {
     if (cur == nullptr)          // empty list, or new item starts last
         return pushBack(item);
 
-    DLLNode* newNode = new DLLNode(item);
-    newNode->next    = cur;
-    newNode->prev    = cur->prev;
-
-    if (cur->prev != nullptr)
-        cur->prev->next = newNode;
-    else
-        head_ = newNode;         // new item becomes the earliest event
-
-    cur->prev = newNode;
-    ++size_;
-    return newNode;
+    return insertBefore(cur, item);   // handles the new-head case too
 }
 
 // ----------------------------------------------------------------- remove ---

@@ -175,6 +175,23 @@ static void testDLLAndUndoStack() {
     assert(count == sorted.size());
     ok("insertSorted keeps ascending order (head, middle, tail, ties stable)");
 
+    // pushFront / insertBefore.
+    DoublyLinkedList front;
+    DLLNode* f2 = front.pushFront(e2);           // empty list: head == tail
+    assert(front.head() == f2 && front.tail() == f2);
+    DLLNode* f1 = front.pushFront(e1);           // new head
+    assert(front.head() == f1 && f1->next == f2 && f2->prev == f1);
+    assert(f1->prev == nullptr);
+    DLLNode* fb = front.insertBefore(f2, e4);    // middle: f1 -> fb -> f2
+    assert(f1->next == fb && fb->prev == f1 && fb->next == f2 && f2->prev == fb);
+    DLLNode* fh = front.insertBefore(f1, e3);    // before head -> new head
+    assert(front.head() == fh && fh->prev == nullptr && fh->next == f1 && f1->prev == fh);
+    assert(front.tail() == f2 && front.size() == 4);
+    threw = false;
+    try { front.insertBefore(nullptr, e1); } catch (const std::invalid_argument&) { threw = true; }
+    assert(threw);
+    ok("pushFront and insertBefore (empty, head, middle, null guard)");
+
     // Print remaining items.
     std::cout << "  Schedule after remove:\n";
     for (DLLNode* cur = schedule.head(); cur != nullptr; cur = cur->next)

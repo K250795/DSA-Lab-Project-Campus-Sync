@@ -45,6 +45,13 @@ public:
     // Append a new item at the tail.  Returns a pointer to the new node.
     DLLNode* pushBack(const ScheduleItem& item);
 
+    // Prepend a new item at the head.  Returns a pointer to the new node.
+    DLLNode* pushFront(const ScheduleItem& item);
+
+    // Insert 'item' immediately before 'node'.
+    // Returns a pointer to the newly created node.
+    DLLNode* insertBefore(DLLNode* node, const ScheduleItem& item);
+
     // Insert 'item' immediately after 'node'.
     // Returns a pointer to the newly created node.
     DLLNode* insertAfter(DLLNode* node, const ScheduleItem& item);
