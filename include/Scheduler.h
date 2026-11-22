@@ -29,6 +29,13 @@ public:
     // Returns false (and changes nothing) if no event has that title.
     bool removeEvent(const std::string& title);
 
+    // Restore the schedule to how it was before the most recent edit.
+    // Returns false (and changes nothing) if there is nothing to undo.
+    bool undo();
+
+    // Read-only view of the live schedule, in start-time order.
+    const DoublyLinkedList& getSchedule() const { return schedule_; }
+
 private:
     DoublyLinkedList schedule_;   // live, start-time ordered schedule
     UndoStack        undo_;       // snapshots taken before each edit

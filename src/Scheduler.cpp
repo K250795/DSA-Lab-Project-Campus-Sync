@@ -25,3 +25,13 @@ bool Scheduler::removeEvent(const std::string& title) {
     schedule_.remove(node);                 // O(1) unlink; node is in schedule_
     return true;
 }
+
+// ------------------------------------------------------------------- undo ---
+// Replace the live list with the most recent pre-edit snapshot.
+bool Scheduler::undo() {
+    if (undo_.empty())
+        return false;
+
+    schedule_ = undo_.pop();                // deep-copy assignment
+    return true;
+}
