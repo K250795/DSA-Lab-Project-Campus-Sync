@@ -96,6 +96,31 @@ DLLNode* DoublyLinkedList::insertAfter(DLLNode* node, const ScheduleItem& item) 
     return newNode;
 }
 
+// ---------------------------------------------------------- insertSorted ---
+// Walk from the head past every node whose start is <= the new start, then
+// link the new node in front of the first node that starts later.
+DLLNode* DoublyLinkedList::insertSorted(const ScheduleItem& item) {
+    DLLNode* cur = head_;
+    while (cur != nullptr && cur->data.startMin <= item.startMin)
+        cur = cur->next;
+
+    if (cur == nullptr)          // empty list, or new item starts last
+        return pushBack(item);
+
+    DLLNode* newNode = new DLLNode(item);
+    newNode->next    = cur;
+    newNode->prev    = cur->prev;
+
+    if (cur->prev != nullptr)
+        cur->prev->next = newNode;
+    else
+        head_ = newNode;         // new item becomes the earliest event
+
+    cur->prev = newNode;
+    ++size_;
+    return newNode;
+}
+
 // ----------------------------------------------------------------- remove ---
 void DoublyLinkedList::remove(DLLNode* node) {
     if (node == nullptr)

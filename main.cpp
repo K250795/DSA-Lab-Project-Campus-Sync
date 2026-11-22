@@ -151,6 +151,30 @@ static void testDLLAndUndoStack() {
     assert(copy.size() == 4);
     ok("remove() O(1) node deletion; copy unaffected");
 
+    // insertSorted: insert out of order, expect ascending start times.
+    DoublyLinkedList sorted;
+    sorted.insertSorted(e3);                                    // 13:00 (empty list)
+    sorted.insertSorted(e1);                                    // 08:00 (new head)
+    sorted.insertSorted(e2);                                    // 10:00 (middle)
+    ScheduleItem late{"Evening Study", timeToMinutes("16:00"), timeToMinutes("17:00"), 105};
+    sorted.insertSorted(late);                                  // 16:00 (new tail)
+    ScheduleItem tie{"Quiz", timeToMinutes("10:00"), timeToMinutes("10:15"), 106};
+    DLLNode* tieNode = sorted.insertSorted(tie);                // equal start -> after e2
+    assert(sorted.size() == 5);
+    assert(sorted.head()->data.title == "CS101 Lecture");
+    assert(sorted.tail()->data.title == "Evening Study");
+    assert(tieNode->prev->data.title == "Math Tutorial");
+    int prevStart = -1;
+    int count = 0;
+    for (DLLNode* cur = sorted.head(); cur != nullptr; cur = cur->next) {
+        assert(cur->data.startMin >= prevStart);
+        assert(cur->next == nullptr || cur->next->prev == cur);   // back links intact
+        prevStart = cur->data.startMin;
+        ++count;
+    }
+    assert(count == sorted.size());
+    ok("insertSorted keeps ascending order (head, middle, tail, ties stable)");
+
     // Print remaining items.
     std::cout << "  Schedule after remove:\n";
     for (DLLNode* cur = schedule.head(); cur != nullptr; cur = cur->next)

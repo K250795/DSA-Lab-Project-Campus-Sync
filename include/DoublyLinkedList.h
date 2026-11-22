@@ -49,6 +49,11 @@ public:
     // Returns a pointer to the newly created node.
     DLLNode* insertAfter(DLLNode* node, const ScheduleItem& item);
 
+    // Insert 'item' keeping the list ordered by ascending startMin.
+    // Items with an equal start time keep insertion order (stable).
+    // Returns a pointer to the newly created node.
+    DLLNode* insertSorted(const ScheduleItem& item);
+
     // Remove and destroy the given node.  The pointer is invalidated.
     void remove(DLLNode* node);
 
