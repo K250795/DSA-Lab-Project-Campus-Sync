@@ -33,10 +33,16 @@ public:
     // Returns false (and changes nothing) if there is nothing to undo.
     bool undo();
 
+    // Re-apply the most recently undone edit.
+    // Returns false (and changes nothing) if there is nothing to redo.
+    // Any new successful addEvent/removeEvent clears the redo history.
+    bool redo();
+
     // Read-only view of the live schedule, in start-time order.
     const DoublyLinkedList& getSchedule() const { return schedule_; }
 
 private:
     DoublyLinkedList schedule_;   // live, start-time ordered schedule
     UndoStack        undo_;       // snapshots taken before each edit
+    UndoStack        redo_;       // snapshots taken before each undo
 };
