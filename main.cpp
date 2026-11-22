@@ -192,6 +192,23 @@ static void testDLLAndUndoStack() {
     assert(threw);
     ok("pushFront and insertBefore (empty, head, middle, null guard)");
 
+    // findByTitle / removeByTitle on the sorted list
+    // (CS101 Lecture, Math Tutorial, Quiz, Lab Session, Evening Study).
+    assert(sorted.findByTitle("Quiz") == tieNode);
+    assert(sorted.findByTitle("quiz") == nullptr);              // case-sensitive
+    assert(sorted.findByTitle("Missing Event") == nullptr);
+    assert(sorted.removeByTitle("Quiz"));                       // middle
+    assert(sorted.findByTitle("Quiz") == nullptr && sorted.size() == 4);
+    assert(sorted.removeByTitle("CS101 Lecture"));              // head
+    assert(sorted.head()->data.title == "Math Tutorial" && sorted.head()->prev == nullptr);
+    assert(sorted.removeByTitle("Evening Study"));              // tail
+    assert(sorted.tail()->data.title == "Lab Session" && sorted.tail()->next == nullptr);
+    assert(!sorted.removeByTitle("Missing Event"));             // no match
+    assert(sorted.size() == 2);
+    assert(sorted.removeByTitle("Math Tutorial") && sorted.removeByTitle("Lab Session"));
+    assert(sorted.empty() && sorted.head() == nullptr && sorted.tail() == nullptr);
+    ok("findByTitle / removeByTitle (head, middle, tail, miss, empty)");
+
     // Print remaining items.
     std::cout << "  Schedule after remove:\n";
     for (DLLNode* cur = schedule.head(); cur != nullptr; cur = cur->next)

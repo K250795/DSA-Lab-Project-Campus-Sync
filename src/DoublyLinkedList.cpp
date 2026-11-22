@@ -163,6 +163,25 @@ void DoublyLinkedList::remove(DLLNode* node) {
     --size_;
 }
 
+// ----------------------------------------------------------- findByTitle ---
+// Linear scan from the head; returns the first exact match.
+DLLNode* DoublyLinkedList::findByTitle(const std::string& title) const {
+    for (DLLNode* cur = head_; cur != nullptr; cur = cur->next)
+        if (cur->data.title == title)
+            return cur;
+    return nullptr;
+}
+
+// --------------------------------------------------------- removeByTitle ---
+// Locate the node with findByTitle, then unlink it in O(1) with remove().
+bool DoublyLinkedList::removeByTitle(const std::string& title) {
+    DLLNode* node = findByTitle(title);
+    if (node == nullptr)
+        return false;
+    remove(node);
+    return true;
+}
+
 // ------------------------------------------------------------------ clear ---
 void DoublyLinkedList::clear() {
     DLLNode* cur = head_;

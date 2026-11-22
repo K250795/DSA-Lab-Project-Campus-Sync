@@ -64,6 +64,14 @@ public:
     // Remove and destroy the given node.  The pointer is invalidated.
     void remove(DLLNode* node);
 
+    // Return the first node whose title matches exactly (case-sensitive),
+    // or nullptr if none does.
+    DLLNode* findByTitle(const std::string& title) const;
+
+    // Remove the first node whose title matches exactly.
+    // Returns true if a node was removed, false if no match was found.
+    bool removeByTitle(const std::string& title);
+
     // Remove and destroy all nodes.
     void clear();
 
