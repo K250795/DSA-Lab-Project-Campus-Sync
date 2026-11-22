@@ -117,9 +117,9 @@ static void testDLLAndUndoStack() {
     assert(threw);
     ok("timeToMinutes / minutesToTime round-trip and reject bad input");
 
-    ScheduleItem e1{"CS101 Lecture", timeToMinutes("08:00"), timeToMinutes("09:30"), 101};
-    ScheduleItem e2{"Math Tutorial", timeToMinutes("10:00"), timeToMinutes("11:00"), 102};
-    ScheduleItem e3{"Lab Session",   timeToMinutes("13:00"), timeToMinutes("15:00"), 103};
+    ScheduleItem e1{"CS101 Lecture", timeToMinutes("08:00"), timeToMinutes("09:30"), 2};   // Academic Block A
+    ScheduleItem e2{"Math Tutorial", timeToMinutes("10:00"), timeToMinutes("11:00"), 3};   // Academic Block B
+    ScheduleItem e3{"Lab Session",   timeToMinutes("13:00"), timeToMinutes("15:00"), 5};   // CS Lab One
 
     DLLNode* n1 = schedule.pushBack(e1);
     DLLNode* n2 = schedule.pushBack(e2);
@@ -128,7 +128,7 @@ static void testDLLAndUndoStack() {
     ok("pushBack 3 items");
 
     // Insert between n1 and n2.
-    ScheduleItem e4{"Office Hours", timeToMinutes("09:30"), timeToMinutes("10:00"), 104};
+    ScheduleItem e4{"Office Hours", timeToMinutes("09:30"), timeToMinutes("10:00"), 4};   // EE Block
     DLLNode* n4 = schedule.insertAfter(n1, e4);
     assert(schedule.size() == 4);
     // Order: n1 -> n4 -> n2 -> n3
@@ -156,9 +156,9 @@ static void testDLLAndUndoStack() {
     sorted.insertSorted(e3);                                    // 13:00 (empty list)
     sorted.insertSorted(e1);                                    // 08:00 (new head)
     sorted.insertSorted(e2);                                    // 10:00 (middle)
-    ScheduleItem late{"Evening Study", timeToMinutes("16:00"), timeToMinutes("17:00"), 105};
+    ScheduleItem late{"Evening Study", timeToMinutes("16:00"), timeToMinutes("17:00"), 7};   // Library
     sorted.insertSorted(late);                                  // 16:00 (new tail)
-    ScheduleItem tie{"Quiz", timeToMinutes("10:00"), timeToMinutes("10:15"), 106};
+    ScheduleItem tie{"Quiz", timeToMinutes("10:00"), timeToMinutes("10:15"), 6};   // CS Lab Two
     DLLNode* tieNode = sorted.insertSorted(tie);                // equal start -> after e2
     assert(sorted.size() == 5);
     assert(sorted.head()->data.title == "CS101 Lecture");
@@ -238,36 +238,56 @@ static void testDLLAndUndoStack() {
     UndoStack undo;
     assert(undo.empty());
 
+    // Build the day out of order with insertSorted, snapshotting after each edit.
     // Snapshot 1: 1 item.
     DoublyLinkedList s1;
-    s1.pushBack(e1);
+    s1.insertSorted(e3);                         // Lab Session 13:00
     undo.push(s1);
     ok("Pushed snapshot 1 (1 item)");
 
     // Snapshot 2: 2 items.
-    s1.pushBack(e2);
+    s1.insertSorted(e1);                         // CS101 Lecture 08:00 -> new head
     undo.push(s1);
     ok("Pushed snapshot 2 (2 items)");
 
     // Snapshot 3: 3 items.
-    s1.pushBack(e3);
+    s1.insertSorted(e2);                         // Math Tutorial 10:00 -> middle
     undo.push(s1);
     ok("Pushed snapshot 3 (3 items)");
 
     assert(undo.size() == 3);
 
-    // Pop and verify LIFO order.
+    // Editing the live list after pushing must not change any snapshot.
+    assert(s1.removeByTitle("CS101 Lecture"));
+    assert(s1.size() == 2);
+    assert(undo.top().size() == 3);
+    assert(undo.top().findByTitle("CS101 Lecture") != nullptr);
+    ok("Snapshots are independent of later edits to the live list");
+
+    // Pop and verify LIFO order and the exact contents of each snapshot.
     DoublyLinkedList restored3 = undo.pop();
     assert(restored3.size() == 3);
-    ok("pop() restored snapshot 3 (3 items)");
+    assert(restored3.head()->data.title == "CS101 Lecture");
+    assert(restored3.head()->next->data.title == "Math Tutorial");
+    assert(restored3.tail()->data.title == "Lab Session");
+    for (DLLNode* cur = restored3.head(); cur != nullptr; cur = cur->next)
+        assert(cur->data.locationId >= 0 && cur->data.locationId <= 14);  // real node IDs
+    ok("pop() restored snapshot 3 (3 items, sorted, valid node IDs)");
 
     DoublyLinkedList restored2 = undo.pop();
     assert(restored2.size() == 2);
-    ok("pop() restored snapshot 2 (2 items)");
+    assert(restored2.head()->data.title == "CS101 Lecture");
+    assert(restored2.head()->data.startMin == timeToMinutes("08:00"));
+    assert(restored2.tail()->data.locationId == 5);             // CS Lab One
+    assert(restored2.findByTitle("Math Tutorial") == nullptr);
+    ok("pop() restored snapshot 2 (2 items, contents match)");
 
     DoublyLinkedList restored1 = undo.pop();
     assert(restored1.size() == 1);
-    ok("pop() restored snapshot 1 (1 item)");
+    assert(restored1.head() == restored1.tail());
+    assert(restored1.head()->data.title == "Lab Session");
+    assert(minutesToTime(restored1.head()->data.endMin) == "15:00");
+    ok("pop() restored snapshot 1 (1 item, contents match)");
 
     assert(undo.empty());
     ok("UndoStack LIFO order and deep-copy semantics verified");
