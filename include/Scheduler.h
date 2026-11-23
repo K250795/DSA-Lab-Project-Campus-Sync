@@ -2,6 +2,7 @@
 #include <string>
 #include "DoublyLinkedList.h"
 #include "UndoStack.h"
+#include "Graph.h"
 
 // Day-schedule manager.
 //
@@ -37,6 +38,12 @@ public:
     // Returns false (and changes nothing) if there is nothing to redo.
     // Any new successful addEvent/removeEvent clears the redo history.
     bool redo();
+
+    // Load events from a CSV file with header "title,start,end,locationId"
+    // (times as "HH:MM").  Each row is inserted through addEvent, so the
+    // usual time-range and overlap checks apply.
+    // Returns false if the file cannot be opened.
+    bool loadFromCsv(const std::string& path, const Graph& g);
 
     // Read-only view of the live schedule, in start-time order.
     const DoublyLinkedList& getSchedule() const { return schedule_; }
