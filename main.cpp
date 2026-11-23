@@ -14,6 +14,7 @@
 #include "Scheduler.h"
 #include "HashMap.h"
 #include "RoomAvailability.h"
+#include "BunkerRadar.h"
 #include "PrefixTrie.h"
 #include "CampusNode.h"
 #include "Graph.h"
@@ -525,6 +526,77 @@ static void testHashMap() {
     ok("freeRoomsAtHour lists free rooms; rebuilding does not duplicate");
 }
 
+// ============================================================== BunkerRadar ===
+static void testBunkerRadar() {
+    section("Bunker Radar (free rooms ranked by utility score)");
+
+    Graph graph;
+    assert(graph.loadGraph("data/nodes.csv", "data/edges.csv"));
+    RoomAvailability rooms;
+    rooms.buildFromGraph(graph);
+    BunkerRadar radar(graph, rooms);
+
+    // Free-room lookup: at 08:00 only Academic Block B (3) and CS Lab Two (6).
+    std::vector<int> free8 = radar.findFreeRooms(8);
+    assert(free8.size() == 2 && free8[0] == 3 && free8[1] == 6);
+    ok("findFreeRooms(8) returns exactly rooms 3 and 6");
+
+    // Consecutive free hours and the score formula.
+    assert(radar.consecutiveFreeHours(6, 8) == 2);    // CS Lab Two free 08-10
+    assert(radar.consecutiveFreeHours(3, 14) == 2);   // free 14:00 and 15:00 (to 16:00)
+    assert(radar.consecutiveFreeHours(3, 9) == 0);    // busy at 09:00
+    assert(radar.consecutiveFreeHours(99, 8) == 0);   // unknown room
+    assert(BunkerRadar::utilityScore(2, 50.0) == 15.0);
+    assert(BunkerRadar::utilityScore(3, 100.0) == BunkerRadar::utilityScore(2, 0.0));  // 1h == 100m
+    ok("consecutiveFreeHours and utilityScore follow the documented formula");
+
+    // An hour with free rooms: user at Central Plaza (1), 08:00.
+    //   CS Lab Two       2h, 95m -> 20 - 9.5 = 10.5
+    //   Academic Block B 1h, 65m -> 10 - 6.5 =  3.5
+    std::vector<BunkerResult> top = radar.topRooms(1, 8, 5);
+    assert(top.size() == 2);                           // only 2 free, even though N = 5
+    assert(top[0].roomId == 6 && top[0].name == "CS Lab Two");
+    assert(top[0].score == 10.5 && top[0].distance == 95.0 && top[0].freeHours == 2);
+    assert(top[1].roomId == 3 && top[1].score == 3.5 && top[1].distance == 65.0);
+    ok("08:00 from Central Plaza: closer room loses to longer free window");
+
+    // Ranking order with more candidates: 11:00 (rush hour) has 4 free rooms.
+    top = radar.topRooms(1, 11, 4);
+    assert(top.size() == 4);
+    for (size_t i = 1; i < top.size(); ++i)
+        assert(top[i - 1].score > top[i].score);       // strictly descending here
+    assert(top[0].roomId == 5 && top[1].roomId == 11 && top[2].roomId == 3 && top[3].roomId == 4);
+    std::cout << "  Top rooms at 11:00 from Central Plaza:\n";
+    for (const BunkerResult& b : top)
+        std::cout << "    [" << b.roomId << "] " << b.name << "  score=" << b.score
+                  << "  dist=" << b.distance << "m  free=" << b.freeHours << "h\n";
+    ok("11:00 ranking is strictly descending: 5 > 11 > 3 > 4");
+
+    // Top-N truncation returns the best N, in the same order.
+    std::vector<BunkerResult> top2 = radar.topRooms(1, 11, 2);
+    assert(top2.size() == 2 && top2[0].roomId == 5 && top2[1].roomId == 11);
+    ok("topN = 2 returns the two highest-scoring rooms");
+
+    // No free rooms: hours outside 08-15, and a campus with no academic rooms.
+    assert(radar.findFreeRooms(7).empty() && radar.topRooms(1, 7, 3).empty());
+    assert(radar.findFreeRooms(16).empty() && radar.topRooms(1, 16, 3).empty());
+    Graph noRooms;                                     // empty campus
+    RoomAvailability noAvailability;
+    assert(noAvailability.buildFromGraph(noRooms) == 0);
+    BunkerRadar emptyRadar(noRooms, noAvailability);
+    for (int hour = BunkerRadar::FIRST_HOUR; hour <= BunkerRadar::LAST_HOUR; ++hour) {
+        assert(emptyRadar.findFreeRooms(hour).empty());
+        assert(emptyRadar.topRooms(0, hour, 3).empty());
+    }
+    ok("No free rooms (hour outside 08-15 / no academic rooms) -> empty result");
+
+    // Invalid inputs.
+    assert(radar.topRooms(1, 8, 0).empty());           // N = 0
+    assert(radar.topRooms(99, 8, 3).empty());          // unknown user node
+    assert(radar.topRooms(-1, 8, 3).empty());
+    ok("topN <= 0 and invalid user node return empty");
+}
+
 // ================================================================ PrefixTrie ===
 static void testPrefixTrie() {
     section("PrefixTrie");
@@ -768,6 +840,7 @@ int main() {
     testDLLAndUndoStack();
     testScheduler();
     testHashMap();
+    testBunkerRadar();
     testPrefixTrie();
 
     // Milestone 2 Campus Data & Spatial Graph Engine
