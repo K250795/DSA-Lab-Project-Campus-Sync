@@ -1042,8 +1042,8 @@ static void testSpeedrunner() {
 
 // ============================================================== self-tests ===
 // Runs every testX() above.  Each one asserts, so reaching the end means all
-// checks passed.  Wired into the menu in the next step.
-[[maybe_unused]] static void runSelfTests() {
+// checks passed; a failed assert stops the program with the failing line.
+static void runSelfTests() {
     std::cout << "========================================================\n";
     std::cout << "        Campus-Sync – Comprehensive System Verification\n";
     std::cout << "========================================================\n";
@@ -1122,6 +1122,7 @@ static void printBanner(const Graph& graph, int roomCount) {
 
 static void printMenu() {
     std::cout << "\n--------------------- Main Menu ------------------------\n"
+              << "  1. Run self-tests\n"
               << "  0. Exit\n"
               << "--------------------------------------------------------\n";
 }
@@ -1149,7 +1150,7 @@ int main() {
     printBanner(graph, roomCount);
 
     // ---- Main menu loop ----
-    const int MAX_CHOICE = 0;
+    const int MAX_CHOICE = 1;
     while (true) {
         printMenu();
         int choice;
@@ -1157,6 +1158,10 @@ int main() {
             break;                                      // end of input
         if (choice == 0)
             break;
+
+        switch (choice) {
+            case 1: runSelfTests(); break;
+        }
     }
 
     std::cout << "\nGoodbye!\n";
