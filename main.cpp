@@ -1091,7 +1091,7 @@ static bool readLine(const std::string& prompt, std::string& out) {
 static bool readInt(const std::string& prompt, int lo, int hi, int& out) {
     std::string line;
     while (readLine(prompt, line)) {
-        bool digitsOnly = !line.empty() && line.size() <= 9;
+        bool digitsOnly = !line.empty();
         std::size_t start = (digitsOnly && line[0] == '-') ? 1 : 0;
         if (start == line.size())
             digitsOnly = false;
@@ -1103,8 +1103,10 @@ static bool readInt(const std::string& prompt, int lo, int hi, int& out) {
             std::cout << "  Please enter a number.\n";
             continue;
         }
-        int value = std::stoi(line);
-        if (value < lo || value > hi) {
+        // A real number that is too long for stoi is simply out of range.
+        bool tooLong = line.size() - start > 9;
+        int value = tooLong ? 0 : std::stoi(line);
+        if (tooLong || value < lo || value > hi) {
             std::cout << "  Please enter a number from " << lo << " to " << hi << ".\n";
             continue;
         }
