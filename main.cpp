@@ -1526,6 +1526,10 @@ static void mySchedule(const Graph& graph, const PrefixTrie& names, Scheduler& d
 // hour; sun avoidance is off.
 static void nextClass(const Graph& graph, const PrefixTrie& names, const Scheduler& day) {
     std::cout << "\n===================== Next class =======================\n";
+    if (day.getSchedule().empty()) {
+        std::cout << "  Your schedule is empty. Add events in My Schedule (option 6).\n";
+        return;
+    }
     int now;
     if (!readTime("  Current time (HH:MM): ", now))
         return;
