@@ -1558,6 +1558,83 @@ static void nextClass(const Graph& graph, const PrefixTrie& names, const Schedul
     std::cout << std::setprecision(6);
 }
 
+// --------------------------------------------------------------- planABreak ---
+// Menu option: Speedrunner.  Collect the break window, start/end places and
+// up to MAX_ERRANDS errands, then show planBreak's best order and path.
+static void planABreak(const Graph& graph, const PrefixTrie& names) {
+    std::cout << "\n============== Plan a break (Speedrunner) ==============\n";
+    int breakStart, breakEnd;
+    if (!readTime("  Break starts (HH:MM): ", breakStart))
+        return;
+    while (true) {
+        if (!readTime("  Break ends   (HH:MM): ", breakEnd))
+            return;
+        if (breakEnd > breakStart)
+            break;
+        std::cout << "  The break must end after " << minutesToTime(breakStart) << ".\n";
+    }
+
+    int start = pickNode(graph, names, "Start at");
+    if (start < 0) return;
+    int end = pickNode(graph, names, "Finish at");
+    if (end < 0) return;
+
+    int count;
+    if (!readInt("  How many errands (0-" + std::to_string(MAX_ERRANDS) + ")? ",
+                 0, MAX_ERRANDS, count))
+        return;
+    std::vector<int> errands;
+    while (static_cast<int>(errands.size()) < count) {
+        int id = pickNode(graph, names, "Errand " + std::to_string(errands.size() + 1));
+        if (id < 0) return;
+        bool duplicate = false;
+        for (int e : errands)
+            if (e == id) duplicate = true;
+        if (duplicate) {
+            std::cout << "    " << graph.getNode(id)->getName()
+                      << " is already on the list. Pick a different place.\n";
+            continue;
+        }
+        errands.push_back(id);
+    }
+
+    int hour;
+    bool avoidSun;
+    if (!readHour(hour) || !readYesNo("  Avoid sun-exposed paths? (y/n): ", avoidSun))
+        return;
+
+    SpeedrunResult plan = planBreak(graph, start, end, errands,
+                                    breakStart, breakEnd, hour, avoidSun);
+    std::cout << "--------------------------------------------------------\n";
+    if (plan.totalMinutes < 0) {
+        std::cout << "  Could not plan this break: some place cannot be reached.\n";
+        return;
+    }
+
+    std::cout << "  Visit order :";
+    if (plan.visitOrder.empty())
+        std::cout << " (no errands, go straight there)";
+    for (std::size_t i = 0; i < plan.visitOrder.size(); ++i)
+        std::cout << (i ? " ->" : "") << ' ' << graph.getNode(plan.visitOrder[i])->getName();
+    std::cout << "\n  Full path   : ";
+    for (std::size_t i = 0; i < plan.fullPath.size(); ++i)
+        std::cout << (i ? " -> " : "") << graph.getNode(plan.fullPath[i])->getName();
+
+    const int breakLen = breakEnd - breakStart;
+    std::cout << std::fixed << std::setprecision(1)
+              << "\n  Total time  : " << plan.totalMinutes << " min (walking + queues) of a "
+              << breakLen << " min break\n";
+    if (plan.feasible)
+        std::cout << "  It fits! Done by about "
+                  << minutesToTime(breakStart + static_cast<int>(plan.totalMinutes + 0.999))
+                  << ", " << breakLen - plan.totalMinutes << " min to spare.\n";
+    else
+        std::cout << "  You're " << plan.totalMinutes - breakLen
+                  << " minutes short. Drop an errand or find a longer break.\n";
+    std::cout.unsetf(std::ios::fixed);
+    std::cout << std::setprecision(6);
+}
+
 static void printMenu() {
     std::cout << "\n--------------------- Main Menu ------------------------\n"
               << "  1. Run self-tests\n"
@@ -1567,6 +1644,7 @@ static void printMenu() {
               << "  5. Bunker Radar (free rooms)\n"
               << "  6. My Schedule\n"
               << "  7. Next class\n"
+              << "  8. Plan a break (Speedrunner)\n"
               << "  0. Exit\n"
               << "--------------------------------------------------------\n";
 }
@@ -1605,7 +1683,7 @@ int main() {
     }
 
     // ---- Main menu loop ----
-    const int MAX_CHOICE = 7;
+    const int MAX_CHOICE = 8;
     while (true) {
         printMenu();
         int choice;
@@ -1622,6 +1700,7 @@ int main() {
             case 5: bunkerRadar(graph, names, rooms); break;
             case 6: mySchedule(graph, names, day);   break;
             case 7: nextClass(graph, names, day);    break;
+            case 8: planABreak(graph, names);        break;
         }
     }
 
