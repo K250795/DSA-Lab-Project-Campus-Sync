@@ -29,6 +29,20 @@ public:
     int  capacity() const { return static_cast<int>(buckets_.size()); }
     bool empty()    const { return size_ == 0; }
 
+    // Insert 'key' -> 'value'.  If 'key' already exists its value is
+    // overwritten.  Returns true if a new key was added, false if updated.
+    bool insert(int key, int value);
+
+    // Look up 'key'.  On success writes the value to 'outValue' and returns
+    // true; returns false (outValue untouched) if the key is absent.
+    bool find(int key, int& outValue) const;
+
+    // True if 'key' is present.
+    bool contains(int key) const;
+
+    // Delete 'key'.  Returns true if it was present, false otherwise.
+    bool remove(int key);
+
     // Index of the bucket 'key' maps to with the current capacity.
     // Public so tests can construct deliberate collisions.
     int bucketIndex(int key) const;
