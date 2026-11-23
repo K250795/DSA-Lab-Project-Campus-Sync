@@ -1430,6 +1430,17 @@ int main() {
 
     printBanner(graph, roomCount);
 
+    // ---- The student's day: loaded once, not undoable ----
+    Scheduler day;
+    if (!day.loadFromCsv("data/schedule.csv", graph)) {
+        std::cout << "  Warning: data/schedule.csv not found; starting with an empty day.\n";
+    } else {
+        std::cout << "  Loaded " << day.getSchedule().size() << " events from data/schedule.csv.\n";
+        if (day.getSkippedCount() > 0)
+            std::cout << "  Warning: skipped " << day.getSkippedCount()
+                      << " invalid or overlapping line(s) in data/schedule.csv.\n";
+    }
+
     // ---- Main menu loop ----
     const int MAX_CHOICE = 5;
     while (true) {
