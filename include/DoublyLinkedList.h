@@ -1,29 +1,24 @@
 #pragma once
 #include <string>
 
-// A single schedule event stored inside the doubly linked list.
-// Times are stored as minutes since midnight (e.g. 08:30 -> 510) so that
+// One schedule event. Times are minutes since midnight (08:30 -> 510), so
 // ordering and overlap checks are plain integer comparisons.
 struct ScheduleItem {
     std::string title;
-    int         startMin;    // start time, minutes since midnight [0, 1439]
-    int         endMin;      // end time,   minutes since midnight [0, 1439]
-    int         locationId;  // references a campus node id
+    int         startMin;
+    int         endMin;
+    int         locationId;  // campus node id
 };
 
-// Convert "HH:MM" (24-hour, e.g. "08:30") to minutes since midnight.
-// Throws std::invalid_argument on malformed or out-of-range input.
+// "HH:MM" -> minutes since midnight; throws std::invalid_argument on bad input.
 int timeToMinutes(const std::string& hhmm);
 
-// Convert minutes since midnight to zero-padded "HH:MM".
-// Throws std::invalid_argument if minutes is outside [0, 1439].
+// Minutes since midnight -> "HH:MM"; throws if outside [0, 1439].
 std::string minutesToTime(int minutes);
 
-// True if two items' time ranges clash.  Ranges are half-open [start, end),
-// so an event ending at 09:30 does NOT clash with one starting at 09:30.
+// Ranges are half-open [start, end): 09:00-09:30 does not clash with 09:30-10:00.
 bool itemsOverlap(const ScheduleItem& a, const ScheduleItem& b);
 
-// Internal doubly-linked node.
 struct DLLNode {
     ScheduleItem data;
     DLLNode*     prev;
@@ -33,60 +28,37 @@ struct DLLNode {
         : data(item), prev(nullptr), next(nullptr) {}
 };
 
-// Pointer-based Doubly Linked List that stores ScheduleItem entries.
-//
-// Design goals:
-//   - O(1) insertion / deletion given a pointer to the node.
-//   - Rule of Three: destructor, deep-copy constructor, copy-assignment.
-//   - No STL list / deque usage.
+// Doubly linked list of ScheduleItems with O(1) insert/remove at a known node.
+// Rule of Three: copies are deep.
 class DoublyLinkedList {
 public:
     DoublyLinkedList();
-    DoublyLinkedList(const DoublyLinkedList& other);           // deep copy
-    DoublyLinkedList& operator=(const DoublyLinkedList& other); // deep copy
+    DoublyLinkedList(const DoublyLinkedList& other);
+    DoublyLinkedList& operator=(const DoublyLinkedList& other);
     ~DoublyLinkedList();
 
-    // Append a new item at the tail.  Returns a pointer to the new node.
+    // All inserts return the new node.
     DLLNode* pushBack(const ScheduleItem& item);
-
-    // Prepend a new item at the head.  Returns a pointer to the new node.
     DLLNode* pushFront(const ScheduleItem& item);
-
-    // Insert 'item' immediately before 'node'.
-    // Returns a pointer to the newly created node.
     DLLNode* insertBefore(DLLNode* node, const ScheduleItem& item);
-
-    // Insert 'item' immediately after 'node'.
-    // Returns a pointer to the newly created node.
     DLLNode* insertAfter(DLLNode* node, const ScheduleItem& item);
 
-    // Insert 'item' keeping the list ordered by ascending startMin.
-    // Items with an equal start time keep insertion order (stable).
-    // Returns a pointer to the newly created node.
+    // Keeps ascending startMin order; equal start times keep insertion order. O(n).
     DLLNode* insertSorted(const ScheduleItem& item);
 
-    // Remove and destroy the given node.  The pointer is invalidated.
+    // Unlinks and deletes 'node'; the pointer is invalid afterwards.
     void remove(DLLNode* node);
 
-    // Return the first node whose title matches exactly (case-sensitive),
-    // or nullptr if none does.
+    // First exact (case-sensitive) title match, or nullptr.
     DLLNode* findByTitle(const std::string& title) const;
-
-    // Remove the first node whose title matches exactly.
-    // Returns true if a node was removed, false if no match was found.
     bool removeByTitle(const std::string& title);
 
-    // Return the first existing node whose time range clashes with 'item',
-    // or nullptr if 'item' fits without conflict.
+    // First event that clashes with 'item', or nullptr.
     DLLNode* findOverlap(const ScheduleItem& item) const;
-
-    // Convenience wrapper: true if 'item' clashes with any existing node.
     bool hasOverlap(const ScheduleItem& item) const { return findOverlap(item) != nullptr; }
 
-    // Remove and destroy all nodes.
     void clear();
 
-    // Traversal helpers.
     DLLNode* head() const { return head_; }
     DLLNode* tail() const { return tail_; }
 
@@ -98,6 +70,6 @@ private:
     DLLNode* tail_;
     int      size_;
 
-    // Helper: copy all nodes from 'other' into this (assumed empty).
+    // Appends a deep copy of every node in 'other'; this list must be empty.
     void copyFrom(const DoublyLinkedList& other);
 };

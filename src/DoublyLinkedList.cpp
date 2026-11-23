@@ -1,9 +1,8 @@
 #include "DoublyLinkedList.h"
 #include <stdexcept>
-#include <cctype>    // std::isdigit
+#include <cctype>
 
-// ---------------------------------------------------------- timeToMinutes ---
-// Parses exactly "HH:MM" (two digits, colon, two digits).
+// Accepts exactly two digits, a colon and two digits.
 int timeToMinutes(const std::string& hhmm) {
     if (hhmm.size() != 5 || hhmm[2] != ':')
         throw std::invalid_argument("timeToMinutes: expected \"HH:MM\"");
@@ -21,8 +20,6 @@ int timeToMinutes(const std::string& hhmm) {
     return hours * 60 + minutes;
 }
 
-// ---------------------------------------------------------- minutesToTime ---
-// Builds a zero-padded "HH:MM" string by hand (no stream formatting).
 std::string minutesToTime(int minutes) {
     if (minutes < 0 || minutes >= 24 * 60)
         throw std::invalid_argument("minutesToTime: minutes out of range");
@@ -38,24 +35,19 @@ std::string minutesToTime(int minutes) {
     return out;
 }
 
-// ----------------------------------------------------------- itemsOverlap ---
-// Two half-open ranges [aStart, aEnd) and [bStart, bEnd) intersect exactly
-// when each one starts before the other one ends.
+// Half-open ranges intersect when each starts before the other ends.
 bool itemsOverlap(const ScheduleItem& a, const ScheduleItem& b) {
     return a.startMin < b.endMin && b.startMin < a.endMin;
 }
 
-// ----------------------------------------------------------- constructor ---
 DoublyLinkedList::DoublyLinkedList()
     : head_(nullptr), tail_(nullptr), size_(0) {}
 
-// -------------------------------------------------- copy constructor ---
 DoublyLinkedList::DoublyLinkedList(const DoublyLinkedList& other)
     : head_(nullptr), tail_(nullptr), size_(0) {
     copyFrom(other);
 }
 
-// ------------------------------------------------- copy assignment ---
 DoublyLinkedList& DoublyLinkedList::operator=(const DoublyLinkedList& other) {
     if (this != &other) {
         clear();
@@ -64,16 +56,13 @@ DoublyLinkedList& DoublyLinkedList::operator=(const DoublyLinkedList& other) {
     return *this;
 }
 
-// ------------------------------------------------------------- destructor ---
 DoublyLinkedList::~DoublyLinkedList() {
     clear();
 }
 
-// --------------------------------------------------------------- pushBack ---
 DLLNode* DoublyLinkedList::pushBack(const ScheduleItem& item) {
     DLLNode* node = new DLLNode(item);
     if (tail_ == nullptr) {
-        // List is empty: new node becomes both head and tail.
         head_ = tail_ = node;
     } else {
         node->prev  = tail_;
@@ -84,11 +73,9 @@ DLLNode* DoublyLinkedList::pushBack(const ScheduleItem& item) {
     return node;
 }
 
-// -------------------------------------------------------------- pushFront ---
 DLLNode* DoublyLinkedList::pushFront(const ScheduleItem& item) {
     DLLNode* node = new DLLNode(item);
     if (head_ == nullptr) {
-        // List is empty: new node becomes both head and tail.
         head_ = tail_ = node;
     } else {
         node->next  = head_;
@@ -99,7 +86,6 @@ DLLNode* DoublyLinkedList::pushFront(const ScheduleItem& item) {
     return node;
 }
 
-// ---------------------------------------------------------- insertBefore ---
 DLLNode* DoublyLinkedList::insertBefore(DLLNode* node, const ScheduleItem& item) {
     if (node == nullptr)
         throw std::invalid_argument("DoublyLinkedList::insertBefore: null node");
@@ -111,14 +97,13 @@ DLLNode* DoublyLinkedList::insertBefore(DLLNode* node, const ScheduleItem& item)
     if (node->prev != nullptr)
         node->prev->next = newNode;
     else
-        head_ = newNode;   // inserting before the current head
+        head_ = newNode;
 
     node->prev = newNode;
     ++size_;
     return newNode;
 }
 
-// ----------------------------------------------------------- insertAfter ---
 DLLNode* DoublyLinkedList::insertAfter(DLLNode* node, const ScheduleItem& item) {
     if (node == nullptr)
         throw std::invalid_argument("DoublyLinkedList::insertAfter: null node");
@@ -130,28 +115,26 @@ DLLNode* DoublyLinkedList::insertAfter(DLLNode* node, const ScheduleItem& item) 
     if (node->next != nullptr)
         node->next->prev = newNode;
     else
-        tail_ = newNode;   // inserting after the current tail
+        tail_ = newNode;
 
     node->next = newNode;
     ++size_;
     return newNode;
 }
 
-// ---------------------------------------------------------- insertSorted ---
-// Walk from the head past every node whose start is <= the new start, then
-// link the new node in front of the first node that starts later.
+// Skip every node starting at or before the new one (<= keeps ties stable),
+// then insert in front of the first later node.
 DLLNode* DoublyLinkedList::insertSorted(const ScheduleItem& item) {
     DLLNode* cur = head_;
     while (cur != nullptr && cur->data.startMin <= item.startMin)
         cur = cur->next;
 
-    if (cur == nullptr)          // empty list, or new item starts last
+    if (cur == nullptr)
         return pushBack(item);
 
-    return insertBefore(cur, item);   // handles the new-head case too
+    return insertBefore(cur, item);
 }
 
-// ----------------------------------------------------------------- remove ---
 void DoublyLinkedList::remove(DLLNode* node) {
     if (node == nullptr)
         throw std::invalid_argument("DoublyLinkedList::remove: null node");
@@ -159,19 +142,17 @@ void DoublyLinkedList::remove(DLLNode* node) {
     if (node->prev != nullptr)
         node->prev->next = node->next;
     else
-        head_ = node->next;   // removing the head
+        head_ = node->next;
 
     if (node->next != nullptr)
         node->next->prev = node->prev;
     else
-        tail_ = node->prev;   // removing the tail
+        tail_ = node->prev;
 
     delete node;
     --size_;
 }
 
-// ----------------------------------------------------------- findByTitle ---
-// Linear scan from the head; returns the first exact match.
 DLLNode* DoublyLinkedList::findByTitle(const std::string& title) const {
     for (DLLNode* cur = head_; cur != nullptr; cur = cur->next)
         if (cur->data.title == title)
@@ -179,9 +160,8 @@ DLLNode* DoublyLinkedList::findByTitle(const std::string& title) const {
     return nullptr;
 }
 
-// ----------------------------------------------------------- findOverlap ---
-// Checks every node: pushBack / pushFront / insertAfter do not guarantee
-// sorted order, so an early exit on start time would not be safe here.
+// Scans the whole list: pushBack/pushFront/insertAfter don't keep it sorted,
+// so stopping early on start time would be unsafe.
 DLLNode* DoublyLinkedList::findOverlap(const ScheduleItem& item) const {
     for (DLLNode* cur = head_; cur != nullptr; cur = cur->next)
         if (itemsOverlap(cur->data, item))
@@ -189,8 +169,6 @@ DLLNode* DoublyLinkedList::findOverlap(const ScheduleItem& item) const {
     return nullptr;
 }
 
-// --------------------------------------------------------- removeByTitle ---
-// Locate the node with findByTitle, then unlink it in O(1) with remove().
 bool DoublyLinkedList::removeByTitle(const std::string& title) {
     DLLNode* node = findByTitle(title);
     if (node == nullptr)
@@ -199,7 +177,6 @@ bool DoublyLinkedList::removeByTitle(const std::string& title) {
     return true;
 }
 
-// ------------------------------------------------------------------ clear ---
 void DoublyLinkedList::clear() {
     DLLNode* cur = head_;
     while (cur != nullptr) {
@@ -211,8 +188,6 @@ void DoublyLinkedList::clear() {
     size_ = 0;
 }
 
-// --------------------------------------------------------------- copyFrom ---
-// Performs a full deep copy (all nodes) from 'other' into this empty list.
 void DoublyLinkedList::copyFrom(const DoublyLinkedList& other) {
     for (DLLNode* cur = other.head_; cur != nullptr; cur = cur->next)
         pushBack(cur->data);

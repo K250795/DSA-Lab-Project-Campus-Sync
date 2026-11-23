@@ -2,35 +2,26 @@
 #include <vector>
 #include "Graph.h"
 
-// Result of planning errands inside a class break.
 struct SpeedrunResult {
-    bool             feasible;      // true if the best order fits in the break
-    std::vector<int> visitOrder;    // errand node ids in the chosen order
+    bool             feasible;      // best order fits in the break
+    std::vector<int> visitOrder;    // errand node ids, best order
     std::vector<int> fullPath;      // every node walked, start to end
-    double           totalMinutes;  // walking + service waits for that order
-                                    // (filled in even when it does not fit);
-                                    // -1 if no plan could be made
+    double           totalMinutes;  // walking + queues; set even if it doesn't fit; -1 if no plan
 };
 
-// "Break Speedrunner": choose the order of up to MAX_ERRANDS errands that gets
-// a student from 'startNode' to 'endNode' in the fewest minutes, and say
-// whether it fits between breakStartMin and breakEndMin (minutes after
-// midnight).
-//
-// Walking cost comes from Graph::dijkstraDistances (same rush-hour and sun
-// rules, via 'currentHour' and 'avoidSun') divided by walkMetersPerMin.
-// ServiceFacility errands also add their estimated queue wait.
-//
-// Invalid input (more than MAX_ERRANDS errands, an unknown or duplicate node,
-// or breakEndMin <= breakStartMin) returns feasible = false and
-// totalMinutes = -1 with empty vectors.  The same happens if some stop cannot
-// be reached at all.
-//
-// If even the best order is longer than the break, feasible = false but
-// visitOrder, fullPath and totalMinutes still describe that best order, so
-// the caller can report "you're (totalMinutes - break length) minutes short".
 static constexpr int MAX_ERRANDS = 4;
 
+// Finds the fastest order to visit up to MAX_ERRANDS errands between
+// startNode and endNode, and whether it fits in [breakStartMin, breakEndMin].
+// Walking minutes = Dijkstra cost (rush/sun rules) / walkMetersPerMin;
+// ServiceFacility errands add their queue wait.
+//
+// Returns totalMinutes = -1 with empty vectors for invalid input (too many
+// errands, unknown or duplicate node, end <= start) or an unreachable stop.
+// If the best order is too long, feasible = false but the other fields still
+// describe it, so the caller can say how many minutes short it is.
+//
+// Cost: 2(k+1) Dijkstra runs plus at most k! orders of O(k) lookups each.
 SpeedrunResult planBreak(const Graph& g, int startNode, int endNode,
                          const std::vector<int>& errands,
                          int breakStartMin, int breakEndMin,
