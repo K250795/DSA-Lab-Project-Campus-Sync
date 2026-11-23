@@ -1,20 +1,27 @@
 #include "Scheduler.h"
 #include <fstream>
 #include <sstream>
+#include <stdexcept>
 
 // --------------------------------------------------------------- addEvent ---
 // Validate first, snapshot second, edit last: a rejected item never leaves a
 // useless snapshot on the undo stack.
 bool Scheduler::addEvent(const ScheduleItem& item) {
-    if (item.endMin <= item.startMin)
-        return false;                       // empty or reversed time range
-    if (schedule_.hasOverlap(item))
-        return false;                       // clashes with an existing event
+    if (!canInsert(item))
+        return false;
 
     undo_.push(schedule_);                  // deep copy of the pre-edit state
     redo_.clear();                          // new edit invalidates redo history
     schedule_.insertSorted(item);
     return true;
+}
+
+// -------------------------------------------------------------- canInsert ---
+// Shared by addEvent and loadFromCsv so both apply exactly the same checks.
+bool Scheduler::canInsert(const ScheduleItem& item) const {
+    if (item.endMin <= item.startMin)
+        return false;                       // empty or reversed time range
+    return !schedule_.hasOverlap(item);     // must not clash with an event
 }
 
 // ------------------------------------------------------------ removeEvent ---
@@ -57,7 +64,12 @@ bool Scheduler::redo() {
 // ------------------------------------------------------------ loadFromCsv ---
 // Same reading style as Graph's loaders: skip the header, strip a trailing
 // '\r' (Windows line endings), split each row on commas.
+//
+// Bad rows are skipped and counted instead of throwing.  Good rows pass the
+// same canInsert() checks as addEvent but are inserted directly, so loading
+// pushes no undo snapshots: the initial load cannot be undone.
 bool Scheduler::loadFromCsv(const std::string& path, const Graph& g) {
+    skippedLines_ = 0;
     std::ifstream file(path);
     if (!file.is_open())
         return false;
@@ -72,19 +84,54 @@ bool Scheduler::loadFromCsv(const std::string& path, const Graph& g) {
             continue;
         }
         if (line.empty())
-            continue;
+            continue;                       // blank lines are not errors
 
-        std::stringstream ss(line);
-        std::string title, start, end, loc;
-        std::getline(ss, title, ',');
-        std::getline(ss, start, ',');
-        std::getline(ss, end, ',');
-        std::getline(ss, loc, ',');
-
-        ScheduleItem item{title, timeToMinutes(start), timeToMinutes(end),
-                          std::stoi(loc)};
-        addEvent(item);
+        ScheduleItem item;
+        if (parseCsvRow(line, g, item) && canInsert(item))
+            schedule_.insertSorted(item);
+        else
+            ++skippedLines_;
     }
-    (void)g;   // location validation is added in the next step
+    return true;
+}
+
+// ------------------------------------------------------------ parseCsvRow ---
+// Split "title,start,end,locationId" and validate every field.
+// Returns false (leaving 'out' unspecified) on any problem.
+bool Scheduler::parseCsvRow(const std::string& line, const Graph& g,
+                            ScheduleItem& out) {
+    std::string fields[4];
+    int count = 0;
+    std::stringstream ss(line);
+    std::string token;
+    while (std::getline(ss, token, ',')) {
+        if (count == 4)
+            return false;                   // too many columns
+        fields[count++] = token;
+    }
+    if (count != 4 || fields[0].empty())
+        return false;                       // too few columns / no title
+
+    // locationId: digits only (no sign, no trailing junk), short enough for int
+    const std::string& loc = fields[3];
+    if (loc.empty() || loc.size() > 9)
+        return false;
+    int locationId = 0;
+    for (char c : loc) {
+        if (c < '0' || c > '9')
+            return false;
+        locationId = locationId * 10 + (c - '0');
+    }
+    if (g.getNode(locationId) == nullptr)
+        return false;                       // no such campus node
+
+    try {
+        out.startMin = timeToMinutes(fields[1]);
+        out.endMin   = timeToMinutes(fields[2]);
+    } catch (const std::invalid_argument&) {
+        return false;                       // not a valid "HH:MM"
+    }
+    out.title      = fields[0];
+    out.locationId = locationId;
     return true;
 }

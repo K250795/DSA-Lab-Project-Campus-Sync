@@ -40,16 +40,29 @@ public:
     bool redo();
 
     // Load events from a CSV file with header "title,start,end,locationId"
-    // (times as "HH:MM").  Each row is inserted through addEvent, so the
-    // usual time-range and overlap checks apply.
-    // Returns false if the file cannot be opened.
+    // (times as "HH:MM").  Rows get the same time-range and overlap checks as
+    // addEvent.  Bad rows (wrong column count, bad time, end <= start,
+    // unknown location, overlap) are skipped and counted, never thrown.
+    // Loading pushes no undo snapshots, so it cannot be undone.
+    // Returns false only if the file cannot be opened.
     bool loadFromCsv(const std::string& path, const Graph& g);
+
+    // Number of rows the most recent loadFromCsv skipped.
+    int getSkippedCount() const { return skippedLines_; }
 
     // Read-only view of the live schedule, in start-time order.
     const DoublyLinkedList& getSchedule() const { return schedule_; }
 
 private:
+    // Validation shared by addEvent and loadFromCsv.
+    bool canInsert(const ScheduleItem& item) const;
+
+    // Parse and validate one CSV row; false if it is malformed.
+    static bool parseCsvRow(const std::string& line, const Graph& g,
+                            ScheduleItem& out);
+
     DoublyLinkedList schedule_;   // live, start-time ordered schedule
     UndoStack        undo_;       // snapshots taken before each edit
     UndoStack        redo_;       // snapshots taken before each undo
+    int              skippedLines_ = 0;   // bad rows in the last load
 };
