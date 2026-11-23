@@ -11,6 +11,7 @@
 #include <cmath>     // std::abs
 #include <iomanip>   // std::setw for aligned menu columns
 #include <utility>   // std::pair
+#include <cctype>    // std::tolower
 
 #include "MinHeap.h"
 #include "MaxHeap.h"
@@ -1195,10 +1196,94 @@ static void findPlace(const Graph& graph, const PrefixTrie& names,
                   << " min wait\n";
 }
 
+// --------------------------------------------------------- readHour/readYesNo ---
+static const double WALK_METERS_PER_MIN = 80.0;   // same pace as Speedrunner
+
+static bool readHour(int& hour) {
+    return readInt("  Hour of day (8-15): ", 8, 15, hour);
+}
+
+// Ask until the user types y/yes or n/no (any case).
+static bool readYesNo(const std::string& prompt, bool& answer) {
+    std::string line;
+    while (readLine(prompt, line)) {
+        for (char& c : line)
+            c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        if (line == "y" || line == "yes") { answer = true;  return true; }
+        if (line == "n" || line == "no")  { answer = false; return true; }
+        std::cout << "  Please answer y or n.\n";
+    }
+    return false;
+}
+
+// The edge from 'from' to 'to', or nullptr if they are not adjacent.
+static const Edge* findEdge(const Graph& graph, int from, int to) {
+    for (const Edge& e : graph.getNeighbors(from))
+        if (e.to == to)
+            return &e;
+    return nullptr;
+}
+
+// ---------------------------------------------------------------- showRoute ---
+// Menu option: shortest route between two places with Graph::dijkstra.
+//
+// Dijkstra minimises the *weighted* cost (rush-hour crowding, plus a 2.5x
+// penalty on outdoor paths when avoiding sun).  The table shows each leg's
+// real length, and the time estimate uses the rush-hour weight only: the sun
+// penalty changes which way you go, not how fast you walk.
+static void showRoute(const Graph& graph, const PrefixTrie& names) {
+    std::cout << "\n============ Route between two places ==================\n";
+    int start = pickNode(graph, names, "Start");
+    if (start < 0) return;
+    int end = pickNode(graph, names, "Destination");
+    if (end < 0) return;
+    int hour;
+    bool avoidSun;
+    if (!readHour(hour) || !readYesNo("  Avoid sun-exposed paths? (y/n): ", avoidSun))
+        return;
+
+    PathResult route = graph.dijkstra(start, end, hour, avoidSun);
+    std::cout << "--------------------------------------------------------\n";
+    if (route.path.empty()) {
+        std::cout << "  No walkable route from " << graph.getNode(start)->getName()
+                  << " to " << graph.getNode(end)->getName() << ".\n";
+        return;
+    }
+
+    std::cout << "  " << std::left << std::setw(4) << "#"
+              << std::setw(22) << "From" << std::setw(22) << "To"
+              << std::right << std::setw(8) << "Meters" << "\n"
+              << "  " << std::string(56, '-') << '\n';
+    double meters = 0.0, walkCost = 0.0;
+    for (std::size_t i = 0; i + 1 < route.path.size(); ++i) {
+        const Edge* e = findEdge(graph, route.path[i], route.path[i + 1]);
+        meters   += e->distance;
+        walkCost += graph.calculateWeight(*e, hour, false);
+        std::cout << "  " << std::left << std::setw(4) << (i + 1)
+                  << std::setw(22) << graph.getNode(route.path[i])->getName()
+                  << std::setw(22) << graph.getNode(route.path[i + 1])->getName()
+                  << std::right << std::setw(8) << e->distance
+                  << (e->isOutdoor ? "  (outdoor)" : "") << '\n';
+    }
+
+    std::cout << "  " << std::string(56, '-') << '\n'
+              << std::fixed << std::setprecision(1)
+              << "  Path     : ";
+    for (std::size_t i = 0; i < route.path.size(); ++i)
+        std::cout << (i ? " -> " : "") << graph.getNode(route.path[i])->getName();
+    std::cout << "\n  Distance : " << meters << " m\n"
+              << "  Time     : about " << walkCost / WALK_METERS_PER_MIN
+              << " min at " << WALK_METERS_PER_MIN << " m/min"
+              << (hour >= 11 && hour <= 14 ? " (rush hour)" : "") << '\n';
+    std::cout.unsetf(std::ios::fixed);
+    std::cout << std::setprecision(6);
+}
+
 static void printMenu() {
     std::cout << "\n--------------------- Main Menu ------------------------\n"
               << "  1. Run self-tests\n"
               << "  2. Find a place\n"
+              << "  3. Route between two places\n"
               << "  0. Exit\n"
               << "--------------------------------------------------------\n";
 }
@@ -1226,7 +1311,7 @@ int main() {
     printBanner(graph, roomCount);
 
     // ---- Main menu loop ----
-    const int MAX_CHOICE = 2;
+    const int MAX_CHOICE = 3;
     while (true) {
         printMenu();
         int choice;
@@ -1238,6 +1323,7 @@ int main() {
         switch (choice) {
             case 1: runSelfTests();                  break;
             case 2: findPlace(graph, names, rooms);  break;
+            case 3: showRoute(graph, names);         break;
         }
     }
 
