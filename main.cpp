@@ -1503,6 +1503,61 @@ static void mySchedule(const Graph& graph, const PrefixTrie& names, Scheduler& d
     }
 }
 
+// ---------------------------------------------------------------- nextClass ---
+// Menu option: find the first event starting at or after the current time
+// and route there with Graph::dijkstra.  The rush-hour rules use the current
+// hour; sun avoidance is off.
+static void nextClass(const Graph& graph, const PrefixTrie& names, const Scheduler& day) {
+    std::cout << "\n===================== Next class =======================\n";
+    int now;
+    if (!readTime("  Current time (HH:MM): ", now))
+        return;
+
+    // The list is in start-time order, so the first match is the next event.
+    const ScheduleItem* next = nullptr;
+    for (DLLNode* cur = day.getSchedule().head(); cur != nullptr; cur = cur->next)
+        if (cur->data.startMin >= now) {
+            next = &cur->data;
+            break;
+        }
+    if (next == nullptr) {
+        std::cout << "  Nothing else on your schedule after " << minutesToTime(now) << ".\n";
+        return;
+    }
+
+    std::cout << "  Next up : ";
+    printEvent(graph, *next);
+    int here = pickNode(graph, names, "You are at");
+    if (here < 0)
+        return;
+
+    const int hour = now / 60;
+    PathResult route = graph.dijkstra(here, next->locationId, hour, false);
+    std::cout << "--------------------------------------------------------\n";
+    if (route.path.empty()) {
+        std::cout << "  No walkable route to " << graph.getNode(next->locationId)->getName() << ".\n";
+        return;
+    }
+
+    double meters, minutes;
+    measurePath(graph, route.path, hour, meters, minutes);
+    std::cout << "  Path     : ";
+    for (std::size_t i = 0; i < route.path.size(); ++i)
+        std::cout << (i ? " -> " : "") << graph.getNode(route.path[i])->getName();
+    std::cout << std::fixed << std::setprecision(1)
+              << "\n  Distance : " << meters << " m\n"
+              << "  Walk     : about " << minutes << " min\n";
+
+    double spare = next->startMin - now - minutes;
+    if (spare < 0)
+        std::cout << "  Warning  : you'll be about " << -spare << " min late!\n";
+    else
+        std::cout << "  On time  : " << spare << " min to spare before "
+                  << minutesToTime(next->startMin) << ".\n";
+    std::cout.unsetf(std::ios::fixed);
+    std::cout << std::setprecision(6);
+}
+
 static void printMenu() {
     std::cout << "\n--------------------- Main Menu ------------------------\n"
               << "  1. Run self-tests\n"
@@ -1511,6 +1566,7 @@ static void printMenu() {
               << "  4. Squad-Sync (meeting point)\n"
               << "  5. Bunker Radar (free rooms)\n"
               << "  6. My Schedule\n"
+              << "  7. Next class\n"
               << "  0. Exit\n"
               << "--------------------------------------------------------\n";
 }
@@ -1549,7 +1605,7 @@ int main() {
     }
 
     // ---- Main menu loop ----
-    const int MAX_CHOICE = 6;
+    const int MAX_CHOICE = 7;
     while (true) {
         printMenu();
         int choice;
@@ -1565,6 +1621,7 @@ int main() {
             case 4: squadSync(graph, names);         break;
             case 5: bunkerRadar(graph, names, rooms); break;
             case 6: mySchedule(graph, names, day);   break;
+            case 7: nextClass(graph, names, day);    break;
         }
     }
 
