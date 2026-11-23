@@ -6,6 +6,8 @@
 #include <string>
 #include <vector>
 #include <stdexcept>
+#include <fstream>   // temporary CSV in testSchedulerCsv
+#include <cstdio>    // std::remove
 
 #include "MinHeap.h"
 #include "MaxHeap.h"
@@ -414,6 +416,89 @@ static void testScheduler() {
                   << minutesToTime(cur->data.startMin) << " - "
                   << minutesToTime(cur->data.endMin) << "] @ node "
                   << cur->data.locationId << '\n';
+}
+
+// ===================================================== Scheduler CSV loading ===
+static void testSchedulerCsv() {
+    section("Scheduler CSV loading (validation, no undo)");
+
+    Graph graph;
+    assert(graph.loadGraph("data/nodes.csv", "data/edges.csv"));
+
+    // Missing file: the only case that returns false.
+    Scheduler none;
+    assert(!none.loadFromCsv("data/no_such_schedule.csv", graph));
+    assert(none.getSchedule().empty());
+    ok("Missing file returns false and leaves the schedule empty");
+
+    // The real student day: every row is valid.
+    Scheduler day;
+    assert(day.loadFromCsv("data/schedule.csv", graph));
+    assert(day.getSkippedCount() == 0);
+    assert(day.getSchedule().size() == 5);
+    assert(titlesOf(day.getSchedule()) ==
+           "Data Structures Lecture|Linear Algebra|Lunch Break|"
+           "Data Structures Lab|Digital Logic Design");
+    int prevStart = -1;
+    for (DLLNode* cur = day.getSchedule().head(); cur != nullptr; cur = cur->next) {
+        assert(cur->data.startMin > prevStart);                  // sorted
+        assert(graph.getNode(cur->data.locationId) != nullptr);  // real node
+        prevStart = cur->data.startMin;
+    }
+    DLLNode* first = day.getSchedule().head();
+    assert(first->data.startMin == timeToMinutes("08:00"));
+    assert(first->data.endMin   == timeToMinutes("09:30"));
+    assert(first->data.locationId == 2);
+    ok("data/schedule.csv: 5 events, start-time order, 0 skipped");
+
+    // Loading pushes no snapshots; later edits are still undoable.
+    assert(!day.undo());
+    assert(day.getSchedule().size() == 5);
+    ScheduleItem gym{"Sports Practice", timeToMinutes("16:00"), timeToMinutes("17:00"), 10};
+    assert(day.addEvent(gym));
+    assert(day.undo());
+    assert(day.getSchedule().size() == 5);
+    assert(!day.undo());                                         // load stays put
+    ok("Initial load cannot be undone; later edits still can");
+
+    // Bad rows: write a temporary CSV, load it, then delete it.
+    const std::string tmpPath = "data/tmp_bad_schedule.csv";
+    {
+        std::ofstream out(tmpPath);
+        assert(out.is_open());
+        out << "title,start,end,locationId\n"
+            << "Good Early,08:00,09:00,2\n"
+            << "Too Few,09:00,10:00\n"                // 3 columns
+            << "Too Many,10:00,11:00,2,extra\n"       // 5 columns
+            << "Bad Time,9:00,10:00,2\n"              // not zero-padded
+            << "Bad Minutes,10:75,11:00,2\n"          // minutes > 59
+            << "Reversed,12:00,11:00,2\n"             // end < start
+            << "Zero Length,12:00,12:00,2\n"          // end == start
+            << "No Node,10:00,11:00,99\n"             // id not in graph
+            << "Negative Node,10:00,11:00,-1\n"       // not digits
+            << "Clash,08:30,09:30,3\n"                // overlaps Good Early
+            << "\n"                                   // blank: ignored
+            << "Good Late,10:00,11:00,3\r\n";         // Windows ending
+    }
+    Scheduler bad;
+    bool loaded = bad.loadFromCsv(tmpPath, graph);
+    std::remove(tmpPath.c_str());
+    assert(loaded);
+    assert(bad.getSkippedCount() == 9);
+    assert(bad.getSchedule().size() == 2);
+    assert(titlesOf(bad.getSchedule()) == "Good Early|Good Late");
+    assert(!bad.undo());
+    std::ifstream gone(tmpPath);
+    assert(!gone.is_open());                                     // cleaned up
+    ok("Bad rows skipped and counted (9), good rows kept, temp file deleted");
+
+    // A second load adds to the existing schedule and resets the counter:
+    // the Lecture (08:00) clashes with Good Early and Linear Algebra (09:45)
+    // clashes with Good Late; the other 3 rows fit.
+    assert(bad.loadFromCsv("data/schedule.csv", graph));
+    assert(bad.getSkippedCount() == 2);
+    assert(bad.getSchedule().size() == 5);
+    ok("Reload resets the skipped count; overlaps with existing events skipped");
 }
 
 // ================================================================== HashMap ===
@@ -839,6 +924,7 @@ int main() {
     testMaxHeap();
     testDLLAndUndoStack();
     testScheduler();
+    testSchedulerCsv();
     testHashMap();
     testBunkerRadar();
     testPrefixTrie();
