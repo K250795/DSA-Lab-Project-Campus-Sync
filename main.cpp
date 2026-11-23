@@ -1040,8 +1040,10 @@ static void testSpeedrunner() {
     ok("Zero errands: direct Dijkstra route; start == end costs 0 min");
 }
 
-// ===================================================================== main ===
-int main() {
+// ============================================================== self-tests ===
+// Runs every testX() above.  Each one asserts, so reaching the end means all
+// checks passed.  Wired into the menu in the next step.
+[[maybe_unused]] static void runSelfTests() {
     std::cout << "========================================================\n";
     std::cout << "        Campus-Sync – Comprehensive System Verification\n";
     std::cout << "========================================================\n";
@@ -1063,5 +1065,100 @@ int main() {
     std::cout << "\n========================================================\n";
     std::cout << "  All system verification checks passed. Zero crashes.\n";
     std::cout << "========================================================\n";
+}
+
+// ============================================================ console input ===
+// Every prompt reads a whole line with getline, so stray text never stays in
+// the buffer for the next prompt.  Returns false on end of input (Ctrl+Z /
+// closed pipe), which the menu treats as Exit.
+static bool readLine(const std::string& prompt, std::string& out) {
+    std::cout << prompt;
+    if (!std::getline(std::cin, out))
+        return false;
+    if (!out.empty() && out.back() == '\r')
+        out.pop_back();
+    std::size_t first = out.find_first_not_of(" \t");
+    std::size_t last  = out.find_last_not_of(" \t");
+    out = (first == std::string::npos) ? "" : out.substr(first, last - first + 1);
+    return true;
+}
+
+// Ask until the user types a whole number in [lo, hi].  Rejects empty input,
+// letters, "3abc", signs on their own and numbers too long to fit an int.
+static bool readInt(const std::string& prompt, int lo, int hi, int& out) {
+    std::string line;
+    while (readLine(prompt, line)) {
+        bool digitsOnly = !line.empty() && line.size() <= 9;
+        std::size_t start = (digitsOnly && line[0] == '-') ? 1 : 0;
+        if (start == line.size())
+            digitsOnly = false;
+        for (std::size_t i = start; digitsOnly && i < line.size(); ++i)
+            if (line[i] < '0' || line[i] > '9')
+                digitsOnly = false;
+
+        if (!digitsOnly) {
+            std::cout << "  Please enter a number.\n";
+            continue;
+        }
+        int value = std::stoi(line);
+        if (value < lo || value > hi) {
+            std::cout << "  Please enter a number from " << lo << " to " << hi << ".\n";
+            continue;
+        }
+        out = value;
+        return true;
+    }
+    return false;
+}
+
+// ============================================================ dashboard UI ===
+static void printBanner(const Graph& graph, int roomCount) {
+    std::cout << "\n========================================================\n"
+              << "                 Campus-Sync Dashboard\n"
+              << "========================================================\n"
+              << "  Loaded " << graph.getNodeCount() << " campus locations, "
+              << roomCount << " bookable rooms.\n";
+}
+
+static void printMenu() {
+    std::cout << "\n--------------------- Main Menu ------------------------\n"
+              << "  0. Exit\n"
+              << "--------------------------------------------------------\n";
+}
+
+// ===================================================================== main ===
+int main() {
+    // ---- Startup: graph, name trie and room availability table ----
+    Graph graph;
+    if (!graph.loadGraph("data/nodes.csv", "data/edges.csv")) {
+        std::cerr << "Error: could not load data/nodes.csv and data/edges.csv.\n"
+                  << "Run campus_sync from the project root folder.\n";
+        return 1;
+    }
+
+    PrefixTrie names;
+    for (int id = 0; id < graph.getNodeCount(); ++id) {
+        CampusNode* node = graph.getNode(id);
+        if (node != nullptr)
+            names.insert(node->getName(), id);
+    }
+
+    RoomAvailability rooms;
+    int roomCount = rooms.buildFromGraph(graph);
+
+    printBanner(graph, roomCount);
+
+    // ---- Main menu loop ----
+    const int MAX_CHOICE = 0;
+    while (true) {
+        printMenu();
+        int choice;
+        if (!readInt("Choose an option: ", 0, MAX_CHOICE, choice))
+            break;                                      // end of input
+        if (choice == 0)
+            break;
+    }
+
+    std::cout << "\nGoodbye!\n";
     return 0;
 }
