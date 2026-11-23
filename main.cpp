@@ -12,6 +12,8 @@
 #include "DoublyLinkedList.h"
 #include "UndoStack.h"
 #include "Scheduler.h"
+#include "HashMap.h"
+#include "RoomAvailability.h"
 #include "PrefixTrie.h"
 #include "CampusNode.h"
 #include "Graph.h"
@@ -413,6 +415,116 @@ static void testScheduler() {
                   << cur->data.locationId << '\n';
 }
 
+// ================================================================== HashMap ===
+static void testHashMap() {
+    section("HashMap (separate chaining, rehash at 0.75)");
+
+    HashMap map;                                    // 8 buckets
+    int value = -1;
+    assert(map.empty() && map.capacity() == HashMap::DEFAULT_CAPACITY);
+    assert(!map.find(42, value) && value == -1);    // missing key: outValue untouched
+    assert(!map.contains(42) && !map.remove(42));
+    ok("Empty map: find/contains/remove on missing key return false");
+
+    // Insert, find, and overwrite.
+    assert(map.insert(1, 100));
+    assert(map.insert(2, 200));
+    assert(map.find(1, value) && value == 100);
+    assert(map.find(2, value) && value == 200);
+    assert(!map.insert(1, 111));                    // existing key -> update
+    assert(map.size() == 2);
+    assert(map.find(1, value) && value == 111);
+    assert(map.insert(-7, 70) && map.find(-7, value) && value == 70);   // negative key
+    ok("insert / find / overwrite (size unchanged on update, negative keys)");
+
+    // Collisions: 3, 11, 19 all land in the same bucket of an 8-bucket map.
+    HashMap chain;
+    assert(chain.bucketIndex(3) == chain.bucketIndex(11));
+    assert(chain.bucketIndex(3) == chain.bucketIndex(19));
+    assert(chain.insert(3, 30) && chain.insert(11, 110) && chain.insert(19, 190));
+    assert(chain.find(3, value) && value == 30);
+    assert(chain.find(11, value) && value == 110);
+    assert(chain.find(19, value) && value == 190);
+    assert(!chain.contains(27));                    // same bucket, never inserted
+    ok("Colliding keys 3 / 11 / 19 share a bucket and stay distinct");
+
+    // Remove from the middle, head and tail of that chain.
+    assert(chain.remove(11));                       // middle
+    assert(!chain.contains(11) && chain.contains(3) && chain.contains(19));
+    assert(chain.remove(19));                       // head (last inserted)
+    assert(chain.remove(3));                        // only remaining entry
+    assert(chain.empty() && !chain.remove(3));
+    assert(chain.insert(11, 1) && chain.find(11, value) && value == 1);  // reusable
+    ok("remove from middle / head / last of a chain; double remove returns false");
+
+    // Rehash: capacity doubles as soon as load factor exceeds 0.75.
+    HashMap grow(4);
+    grow.insert(10, 1); grow.insert(20, 2); grow.insert(30, 3);      // 3/4 == 0.75
+    assert(grow.capacity() == 4);
+    grow.insert(40, 4);                                              // 4/4  > 0.75
+    assert(grow.capacity() == 8 && grow.loadFactor() <= 0.75);
+    for (int k = 0; k < 200; ++k) grow.insert(1000 + k, k);
+    assert(grow.size() == 204);
+    assert(grow.loadFactor() <= 0.75);
+    for (int k = 0; k < 200; ++k)
+        assert(grow.find(1000 + k, value) && value == k);
+    assert(grow.find(10, value) && value == 1 && grow.find(40, value) && value == 4);
+    std::cout << "  204 keys -> capacity " << grow.capacity()
+              << ", load factor " << grow.loadFactor() << '\n';
+    ok("Rehash keeps load factor <= 0.75 and every key findable");
+
+    // Rule of Three: deep copies are independent.
+    HashMap copy = grow;
+    assert(copy.size() == grow.size() && copy.capacity() == grow.capacity());
+    copy.remove(10);
+    copy.insert(20, -2);
+    assert(grow.find(10, value) && value == 1);
+    assert(grow.find(20, value) && value == 2);
+    HashMap assigned(2);
+    assigned.insert(5, 5);
+    assigned = map;
+    assert(assigned.size() == map.size() && !assigned.contains(5));
+    assigned = assigned;                            // self-assignment is safe
+    assert(assigned.find(1, value) && value == 111);
+    assigned.clear();
+    assert(assigned.empty() && map.contains(1));
+    ok("Copy ctor / copy assignment are deep; clear() leaves the source intact");
+
+    // ---- Room availability built from the campus graph ----
+    section("RoomAvailability (room id -> free-slot bitmask)");
+
+    Graph graph;
+    assert(graph.loadGraph("data/nodes.csv", "data/edges.csv"));
+    RoomAvailability rooms;
+    assert(rooms.buildFromGraph(graph) == 6);       // ids 2, 3, 4, 5, 6, 11
+    assert(rooms.hasRoom(2) && rooms.hasRoom(11));
+    assert(!rooms.hasRoom(0) && !rooms.hasRoom(7)); // transit / service nodes
+    assert(!rooms.hasRoom(99) && rooms.getMask(99) == -1);
+    ok("Loaded 6 AcademicRooms; non-academic and unknown ids are absent");
+
+    // Academic Block A (2): busy "11010011" -> free slots 2, 4, 5.
+    assert(rooms.getMask(2) == 0b00110100);
+    assert(rooms.freeSlotCount(2) == 3);
+    assert(rooms.isFreeAtHour(2, 10) && !rooms.isFreeAtHour(2, 8));
+    assert(!rooms.isFreeAtHour(2, 16) && !rooms.isFreeSlot(2, -1));   // out of range
+    for (int id = 0; id < graph.getNodeCount(); ++id) {
+        AcademicRoom* room = dynamic_cast<AcademicRoom*>(graph.getNode(id));
+        if (room == nullptr) continue;
+        for (int slot = 0; slot < RoomAvailability::SLOT_COUNT; ++slot)
+            assert(rooms.isFreeSlot(id, slot) == room->isSlotFree(slot));
+    }
+    ok("Bitmask matches every AcademicRoom schedule slot");
+
+    std::vector<int> freeAt8 = rooms.freeRoomsAtHour(8);
+    assert(freeAt8.size() == 2 && freeAt8[0] == 3 && freeAt8[1] == 6);
+    std::cout << "  Free at 08:00:";
+    for (int id : freeAt8)
+        std::cout << " [" << id << "] " << graph.getNode(id)->getName() << ';';
+    std::cout << '\n';
+    assert(rooms.buildFromGraph(graph) == 6);       // rebuild does not duplicate
+    ok("freeRoomsAtHour lists free rooms; rebuilding does not duplicate");
+}
+
 // ================================================================ PrefixTrie ===
 static void testPrefixTrie() {
     section("PrefixTrie");
@@ -632,6 +744,7 @@ int main() {
     testMaxHeap();
     testDLLAndUndoStack();
     testScheduler();
+    testHashMap();
     testPrefixTrie();
 
     // Milestone 2 Campus Data & Spatial Graph Engine
