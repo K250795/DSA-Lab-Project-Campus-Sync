@@ -3,8 +3,9 @@
 #include <vector>
 #include <utility>   // std::pair
 
-// Fixed alphabet size for a-z (all keys are lowercased before use).
-static constexpr int ALPHA_SIZE = 26;
+// Fixed alphabet: 'a'-'z' (0-25), '0'-'9' (26-35), ' ' (36).
+// Letters are lowercased before use, so lookups are case-insensitive.
+static constexpr int ALPHA_SIZE = 37;
 
 // A single node in the prefix trie.
 struct TrieNode {
@@ -22,7 +23,10 @@ struct TrieNode {
 // to integer campus-node IDs.
 //
 // Rules:
-//   - Alphabet is a-z only after lowercasing (spaces / digits are ignored).
+//   - Alphabet is a-z, 0-9 and space after lowercasing, so "Lab 1" and
+//     "Lab 2" are different keys.  Runs of whitespace collapse to a single
+//     space, leading/trailing whitespace is trimmed, and any other character
+//     (punctuation) is dropped.
 //   - Destructor uses a post-order recursive traversal to free every node.
 //   - No STL containers other than std::string and std::vector used internally.
 class PrefixTrie {
@@ -42,14 +46,18 @@ public:
     int searchExact(const std::string& name) const;
 
     // Returns all (name, id) pairs whose stored key begins with 'prefix'.
-    // The returned names are the original lowercased alpha-only keys.
+    // The returned names are the normalized keys (lowercase, single spaces).
     std::vector<std::pair<std::string, int>> autocomplete(const std::string& prefix) const;
 
 private:
     TrieNode* root_;
 
-    // Convert a string to its lowercase alpha-only form used as the trie key.
+    // Convert a string to the normalized form used as the trie key.
     static std::string normalize(const std::string& s);
+
+    // Map a normalized character to its child index [0, ALPHA_SIZE), and back.
+    static int  charToIndex(char c);
+    static char indexToChar(int idx);
 
     // Post-order destructor helper.
     static void destroyNode(TrieNode* node);

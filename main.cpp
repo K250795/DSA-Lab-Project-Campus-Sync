@@ -572,6 +572,29 @@ static void testPrefixTrie() {
     assert(results.size() == 1);
     assert(results[0].second == 4);
     ok("autocomplete full word returns exactly itself");
+
+    // Digits and spaces are part of the key: "Lab 1" and "Lab 2" stay distinct.
+    PrefixTrie labs;
+    labs.insert("Lab 1", 21);
+    labs.insert("Lab 2", 22);
+    labs.insert("Lab 12", 23);
+    labs.insert("Lab1", 24);                         // no space -> different key
+    assert(labs.searchExact("Lab 1") == 21);
+    assert(labs.searchExact("Lab 2") == 22);
+    assert(labs.searchExact("Lab 12") == 23);
+    assert(labs.searchExact("Lab1") == 24);
+    assert(labs.searchExact("Lab 3") == -1);
+    assert(labs.searchExact("LAB 1") == 21);         // still case-insensitive
+    assert(labs.searchExact("  lab   2 ") == 22);    // extra whitespace collapses
+    assert(labs.searchExact("Lab") == -1);           // prefix only, not a key
+    results = labs.autocomplete("lab 1");            // "lab 1" and "lab 12"
+    assert(results.size() == 2);
+    results = labs.autocomplete("Lab ");             // trailing space trimmed -> "lab"
+    assert(results.size() == 4);
+    std::cout << "  autocomplete(\"lab 1\"):\n";
+    for (auto& [name, id] : labs.autocomplete("lab 1"))
+        std::cout << "    key=\"" << name << "\" id=" << id << '\n';
+    ok("\"Lab 1\" / \"Lab 2\" / \"Lab 12\" / \"Lab1\" stored and found separately");
 }
 
 // ============================================== CampusNode OOP & Spatial Graph ===
