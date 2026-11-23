@@ -8,6 +8,7 @@
 #include <stdexcept>
 #include <fstream>   // temporary CSV in testSchedulerCsv
 #include <cstdio>    // std::remove
+#include <cmath>     // std::abs
 
 #include "MinHeap.h"
 #include "MaxHeap.h"
@@ -17,6 +18,7 @@
 #include "HashMap.h"
 #include "RoomAvailability.h"
 #include "BunkerRadar.h"
+#include "Speedrunner.h"
 #include "PrefixTrie.h"
 #include "CampusNode.h"
 #include "Graph.h"
@@ -913,6 +915,131 @@ static void testCampusGraph() {
     ok("Errand tour tested permutations and produced shortest complete journey");
 }
 
+// ============================================================ Speedrunner ===
+// True if every consecutive pair in 'path' is joined by an edge.
+static bool isWalkablePath(const Graph& g, const std::vector<int>& path) {
+    for (std::size_t i = 0; i + 1 < path.size(); ++i) {
+        bool linked = false;
+        for (const Edge& e : g.getNeighbors(path[i]))
+            if (e.to == path[i + 1])
+                linked = true;
+        if (!linked)
+            return false;
+    }
+    return true;
+}
+
+// Minutes for a fixed order, computed independently with one Dijkstra per
+// leg plus 15 min (queue 5 x 3 min) at each ServiceFacility errand.
+static double minutesForOrder(const Graph& g, int start, int end,
+                              const std::vector<int>& order, int hour) {
+    double total = 0.0;
+    int    prev  = start;
+    for (int id : order) {
+        total += g.dijkstraDistances(prev, hour, false)[id] / 80.0;
+        if (dynamic_cast<const ServiceFacility*>(g.getNode(id)) != nullptr)
+            total += 15.0;
+        prev = id;
+    }
+    return total + g.dijkstraDistances(prev, hour, false)[end] / 80.0;
+}
+
+static void testSpeedrunner() {
+    section("Break Speedrunner (k+1 Dijkstra matrix, pruned permutations)");
+
+    Graph graph;
+    assert(graph.loadGraph("data/nodes.csv", "data/edges.csv"));
+    const int BREAK_START = timeToMinutes("10:00");
+    const int HOUR        = 10;
+    const double EPS      = 1e-9;
+
+    // Feasible: Main Gate -> {Library, Cafeteria, CS Lab One, Sports Room}
+    // -> Academic Block A in a 60-minute break.
+    std::vector<int> errands{7, 9, 5, 10};
+    SpeedrunResult fit = planBreak(graph, 0, 2, errands,
+                                   BREAK_START, BREAK_START + 60, HOUR, false);
+    assert(fit.feasible);
+    assert(fit.visitOrder.size() == 4);
+    for (int id : errands) {                                     // each once
+        int seen = 0;
+        for (int v : fit.visitOrder)
+            if (v == id) ++seen;
+        assert(seen == 1);
+    }
+    assert(fit.totalMinutes <= 60.0);
+    assert(std::abs(fit.totalMinutes -
+                    minutesForOrder(graph, 0, 2, fit.visitOrder, HOUR)) < EPS);
+    assert(fit.fullPath.front() == 0 && fit.fullPath.back() == 2);
+    assert(isWalkablePath(graph, fit.fullPath));
+    std::size_t at = 0;                                          // errands appear
+    for (int id : fit.visitOrder) {                              // in visit order
+        while (at < fit.fullPath.size() && fit.fullPath[at] != id) ++at;
+        assert(at < fit.fullPath.size());
+    }
+    ok("4 errands fit in 60 min; time matches an independent recount");
+
+    // Optimality: no other order of the same errands is faster.
+    std::vector<int> order = errands;
+    for (int a = 0; a < 4; ++a)
+        for (int b = 0; b < 4; ++b)
+            for (int c = 0; c < 4; ++c)
+                for (int d = 0; d < 4; ++d) {
+                    if (a == b || a == c || a == d || b == c || b == d || c == d)
+                        continue;
+                    order = {errands[a], errands[b], errands[c], errands[d]};
+                    assert(fit.totalMinutes <=
+                           minutesForOrder(graph, 0, 2, order, HOUR) + EPS);
+                }
+    ok("Chosen order is no slower than any of the 24 orders");
+
+    std::cout << "  Plan (" << fit.totalMinutes << " min):";
+    for (int id : fit.fullPath)
+        std::cout << ' ' << id;
+    std::cout << '\n';
+
+    // Infeasible: Dhaba errand needs 15 min of queueing; break is 5 min.
+    SpeedrunResult shortBreak = planBreak(graph, 0, 2, {8},
+                                          BREAK_START, BREAK_START + 5, HOUR, false);
+    assert(!shortBreak.feasible);
+    assert(shortBreak.totalMinutes > 5.0);                       // real time kept
+    assert(shortBreak.visitOrder.size() == 1 && shortBreak.visitOrder[0] == 8);
+    assert(shortBreak.fullPath.front() == 0 && shortBreak.fullPath.back() == 2);
+    assert(isWalkablePath(graph, shortBreak.fullPath));
+    std::cout << "  5-min break: " << shortBreak.totalMinutes - 5.0
+              << " minutes short\n";
+    ok("Too-short break: feasible=false but best order, path and time returned");
+
+    // Invalid input: feasible=false, totalMinutes=-1, empty vectors.
+    SpeedrunResult bad[] = {
+        planBreak(graph, 0, 2, {3, 4, 5, 6, 7}, BREAK_START, BREAK_START + 60, HOUR, false),
+        planBreak(graph, 0, 2, {99},            BREAK_START, BREAK_START + 60, HOUR, false),
+        planBreak(graph, 0, 2, {-1},            BREAK_START, BREAK_START + 60, HOUR, false),
+        planBreak(graph, 42, 2, {},             BREAK_START, BREAK_START + 60, HOUR, false),
+        planBreak(graph, 0, 2, {5, 5},          BREAK_START, BREAK_START + 60, HOUR, false),
+        planBreak(graph, 0, 2, {},              BREAK_START, BREAK_START,      HOUR, false),
+    };
+    for (const SpeedrunResult& r : bad) {
+        assert(!r.feasible);
+        assert(r.totalMinutes == -1.0);
+        assert(r.visitOrder.empty() && r.fullPath.empty());
+    }
+    ok("Rejected: 5 errands, unknown/negative node, duplicate, empty break");
+
+    // Zero errands: walk straight from start to end.
+    SpeedrunResult direct = planBreak(graph, 0, 2, {},
+                                      BREAK_START, BREAK_START + 60, HOUR, false);
+    PathResult straight = graph.dijkstra(0, 2, HOUR, false);
+    assert(direct.feasible);
+    assert(direct.visitOrder.empty());
+    assert(direct.fullPath == straight.path);
+    assert(std::abs(direct.totalMinutes - straight.totalCost / 80.0) < EPS);
+    SpeedrunResult stay = planBreak(graph, 0, 0, {},
+                                    BREAK_START, BREAK_START + 60, HOUR, false);
+    assert(stay.feasible && stay.totalMinutes == 0.0);
+    assert(stay.fullPath.size() == 1 && stay.fullPath[0] == 0);
+    ok("Zero errands: direct Dijkstra route; start == end costs 0 min");
+}
+
 // ===================================================================== main ===
 int main() {
     std::cout << "========================================================\n";
@@ -931,6 +1058,7 @@ int main() {
 
     // Milestone 2 Campus Data & Spatial Graph Engine
     testCampusGraph();
+    testSpeedrunner();
 
     std::cout << "\n========================================================\n";
     std::cout << "  All system verification checks passed. Zero crashes.\n";
