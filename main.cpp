@@ -1349,12 +1349,61 @@ static void squadSync(const Graph& graph, const PrefixTrie& names) {
     std::cout << std::setprecision(6);
 }
 
+// -------------------------------------------------------------- bunkerRadar ---
+// Menu option: the 3 best empty rooms to sit in at a given hour, ranked by
+// BunkerRadar's utility score (10 points per consecutive free hour, minus
+// 1 point per 10 m of walking).
+static void bunkerRadar(const Graph& graph, const PrefixTrie& names,
+                        const RoomAvailability& rooms) {
+    std::cout << "\n==================== Bunker Radar ======================\n";
+    int hour;
+    if (!readHour(hour))
+        return;
+    int here = pickNode(graph, names, "You are at");
+    if (here < 0)
+        return;
+
+    BunkerRadar radar(graph, rooms);
+    std::vector<BunkerResult> top = radar.topRooms(here, hour, 3);
+    std::cout << "--------------------------------------------------------\n";
+    if (top.empty()) {
+        std::cout << "  No free rooms at " << (hour < 10 ? "0" : "") << hour
+                  << ":00 that you can walk to.\n";
+        return;
+    }
+
+    std::cout << "  Free rooms at " << (hour < 10 ? "0" : "") << hour << ":00 near "
+              << graph.getNode(here)->getName() << ":\n"
+              << "  " << std::string(56, '-') << '\n'
+              << "  " << std::left << std::setw(4) << "#" << std::setw(20) << "Room"
+              << std::right << std::setw(8) << "Score" << std::setw(12) << "Distance"
+              << std::setw(12) << "Free for" << '\n'
+              << "  " << std::string(56, '-') << '\n'
+              << std::fixed << std::setprecision(1);
+    for (std::size_t i = 0; i < top.size(); ++i) {
+        const BunkerResult& r = top[i];
+        int untilHour = hour + r.freeHours;
+        std::cout << "  " << std::left << std::setw(4) << (i + 1)
+                  << std::setw(20) << r.name
+                  << std::right << std::setw(8) << r.score
+                  << std::setw(10) << r.distance << " m"
+                  << std::setw(7) << r.freeHours << " h"
+                  << "  (until " << (untilHour < 10 ? "0" : "") << untilHour << ":00)\n";
+    }
+    std::cout << "  " << std::string(56, '-') << '\n';
+    if (hour >= 11 && hour <= 14)
+        std::cout << "  Distances include the rush-hour crowd penalty.\n";
+    std::cout.unsetf(std::ios::fixed);
+    std::cout << std::setprecision(6);
+}
+
 static void printMenu() {
     std::cout << "\n--------------------- Main Menu ------------------------\n"
               << "  1. Run self-tests\n"
               << "  2. Find a place\n"
               << "  3. Route between two places\n"
               << "  4. Squad-Sync (meeting point)\n"
+              << "  5. Bunker Radar (free rooms)\n"
               << "  0. Exit\n"
               << "--------------------------------------------------------\n";
 }
@@ -1382,7 +1431,7 @@ int main() {
     printBanner(graph, roomCount);
 
     // ---- Main menu loop ----
-    const int MAX_CHOICE = 4;
+    const int MAX_CHOICE = 5;
     while (true) {
         printMenu();
         int choice;
@@ -1396,6 +1445,7 @@ int main() {
             case 2: findPlace(graph, names, rooms);  break;
             case 3: showRoute(graph, names);         break;
             case 4: squadSync(graph, names);         break;
+            case 5: bunkerRadar(graph, names, rooms); break;
         }
     }
 
