@@ -17,6 +17,9 @@ struct HashEntry {
 //   - Bucket array: std::vector<HashEntry*> used strictly as backing array
 //     storage; each slot is the head of a manual singly linked chain.
 //   - Hash function: key mod capacity (made non-negative for negative keys).
+//   - Rehash: when size / capacity exceeds 0.75 after an insert, the bucket
+//     array doubles and every entry is relinked into its new bucket.
+//   - Rule of Three: destructor, deep-copy constructor, copy-assignment.
 //   - No std::unordered_map / std::list used.
 class HashMap {
 public:
@@ -24,10 +27,19 @@ public:
 
     // Creates an empty map with 'initialCapacity' buckets (minimum 1).
     explicit HashMap(int initialCapacity = DEFAULT_CAPACITY);
+    HashMap(const HashMap& other);              // deep copy
+    HashMap& operator=(const HashMap& other);   // deep copy
+    ~HashMap();
 
     int  size()     const { return size_; }
     int  capacity() const { return static_cast<int>(buckets_.size()); }
     bool empty()    const { return size_ == 0; }
+
+    // Current load factor = entries / buckets.
+    double loadFactor() const { return static_cast<double>(size_) / capacity(); }
+
+    // Delete every entry; capacity is kept.
+    void clear();
 
     // Insert 'key' -> 'value'.  If 'key' already exists its value is
     // overwritten.  Returns true if a new key was added, false if updated.
@@ -53,4 +65,10 @@ private:
 
     // Simple modular hash: maps any int key into [0, cap).
     static int hashKey(int key, int cap);
+
+    // Move every entry into a new bucket array of 'newCapacity' buckets.
+    void rehash(int newCapacity);
+
+    // Helper: deep-copy all entries from 'other' (this must be empty).
+    void copyFrom(const HashMap& other);
 };
