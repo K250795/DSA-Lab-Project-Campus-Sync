@@ -1397,6 +1397,112 @@ static void bunkerRadar(const Graph& graph, const PrefixTrie& names,
     std::cout << std::setprecision(6);
 }
 
+// ----------------------------------------------------------------- readTime ---
+// Ask until the user types a valid "HH:MM" (00:00-23:59, zero-padded).
+static bool readTime(const std::string& prompt, int& minutes) {
+    std::string line;
+    while (readLine(prompt, line)) {
+        try {
+            minutes = timeToMinutes(line);
+            return true;
+        } catch (const std::invalid_argument&) {
+            std::cout << "  Please enter a time like 09:30 (24-hour HH:MM).\n";
+        }
+    }
+    return false;
+}
+
+// One schedule line: "HH:MM - HH:MM  Title  @ Location".
+static void printEvent(const Graph& graph, const ScheduleItem& item) {
+    std::cout << minutesToTime(item.startMin) << " - " << minutesToTime(item.endMin)
+              << "  " << std::left << std::setw(26) << item.title << std::right
+              << " @ " << graph.getNode(item.locationId)->getName() << '\n';
+}
+
+// ------------------------------------------------------------- mySchedule ---
+// Submenu: view, add, remove, undo and redo on the day's Scheduler.
+static void showDay(const Graph& graph, const Scheduler& day) {
+    std::cout << "\n  ------------------- Your day -------------------------\n";
+    if (day.getSchedule().empty()) {
+        std::cout << "  (no events)\n";
+        return;
+    }
+    int n = 1;
+    for (DLLNode* cur = day.getSchedule().head(); cur != nullptr; cur = cur->next, ++n) {
+        std::cout << "  " << std::setw(2) << n << ". ";
+        printEvent(graph, cur->data);
+    }
+}
+
+static void addToDay(const Graph& graph, const PrefixTrie& names, Scheduler& day) {
+    std::string title;
+    if (!readLine("  Title (Enter to cancel): ", title) || title.empty())
+        return;
+    int start, end;
+    if (!readTime("  Start (HH:MM): ", start) || !readTime("  End   (HH:MM): ", end))
+        return;
+    if (end <= start) {
+        std::cout << "  Not added: the end time must be after the start time.\n";
+        return;
+    }
+    int where = pickNode(graph, names, "Location");
+    if (where < 0)
+        return;
+
+    ScheduleItem item{title, start, end, where};
+    if (day.addEvent(item)) {
+        std::cout << "  Added: ";
+        printEvent(graph, item);
+        return;
+    }
+    DLLNode* clash = day.getSchedule().findOverlap(item);
+    std::cout << "  Not added: it overlaps ";
+    if (clash != nullptr)
+        printEvent(graph, clash->data);
+    else
+        std::cout << "an existing event.\n";
+}
+
+static void removeFromDay(Scheduler& day) {
+    std::string title;
+    if (!readLine("  Title to remove (Enter to cancel): ", title) || title.empty())
+        return;
+    if (day.removeEvent(title))
+        std::cout << "  Removed \"" << title << "\".\n";
+    else
+        std::cout << "  No event is called \"" << title << "\" (titles must match exactly).\n";
+}
+
+static void mySchedule(const Graph& graph, const PrefixTrie& names, Scheduler& day) {
+    while (true) {
+        std::cout << "\n==================== My Schedule =======================\n"
+                  << "  1. View the day\n"
+                  << "  2. Add an event\n"
+                  << "  3. Remove an event\n"
+                  << "  4. Undo\n"
+                  << "  5. Redo\n"
+                  << "  0. Back\n"
+                  << "--------------------------------------------------------\n";
+        int choice;
+        if (!readInt("Choose an option: ", 0, 5, choice) || choice == 0)
+            return;
+
+        switch (choice) {
+            case 1: showDay(graph, day);              break;
+            case 2: addToDay(graph, names, day);      break;
+            case 3: removeFromDay(day);               break;
+            case 4:
+                if (day.undo()) { std::cout << "  Undone.";  showDay(graph, day); }
+                else            std::cout << "  Nothing to undo.\n";
+                break;
+            case 5:
+                if (day.redo()) { std::cout << "  Redone.";  showDay(graph, day); }
+                else            std::cout << "  Nothing to redo.\n";
+                break;
+        }
+    }
+}
+
 static void printMenu() {
     std::cout << "\n--------------------- Main Menu ------------------------\n"
               << "  1. Run self-tests\n"
@@ -1404,6 +1510,7 @@ static void printMenu() {
               << "  3. Route between two places\n"
               << "  4. Squad-Sync (meeting point)\n"
               << "  5. Bunker Radar (free rooms)\n"
+              << "  6. My Schedule\n"
               << "  0. Exit\n"
               << "--------------------------------------------------------\n";
 }
@@ -1442,7 +1549,7 @@ int main() {
     }
 
     // ---- Main menu loop ----
-    const int MAX_CHOICE = 5;
+    const int MAX_CHOICE = 6;
     while (true) {
         printMenu();
         int choice;
@@ -1457,6 +1564,7 @@ int main() {
             case 3: showRoute(graph, names);         break;
             case 4: squadSync(graph, names);         break;
             case 5: bunkerRadar(graph, names, rooms); break;
+            case 6: mySchedule(graph, names, day);   break;
         }
     }
 
