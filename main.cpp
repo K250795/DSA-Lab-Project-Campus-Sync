@@ -1279,11 +1279,82 @@ static void showRoute(const Graph& graph, const PrefixTrie& names) {
     std::cout << std::setprecision(6);
 }
 
+// -------------------------------------------------------------- measurePath ---
+// Real meters and estimated walking minutes along a Dijkstra path (same rules
+// as showRoute: rush-hour weight counts toward time, sun penalty does not).
+static void measurePath(const Graph& graph, const std::vector<int>& path, int hour,
+                        double& meters, double& minutes) {
+    meters = 0.0;
+    double walkCost = 0.0;
+    for (std::size_t i = 0; i + 1 < path.size(); ++i) {
+        const Edge* e = findEdge(graph, path[i], path[i + 1]);
+        meters   += e->distance;
+        walkCost += graph.calculateWeight(*e, hour, false);
+    }
+    minutes = walkCost / WALK_METERS_PER_MIN;
+}
+
+// ---------------------------------------------------------------- squadSync ---
+// Menu option: 2-4 friends at different places; Graph::findSquadMeetup picks
+// the node with the lowest total travel cost for the whole group.
+static void squadSync(const Graph& graph, const PrefixTrie& names) {
+    std::cout << "\n===================== Squad-Sync =======================\n";
+    int count;
+    if (!readInt("  How many people (2-4)? ", 2, 4, count))
+        return;
+
+    std::vector<int> squad;
+    for (int i = 1; i <= count; ++i) {
+        int id = pickNode(graph, names, "Person " + std::to_string(i));
+        if (id < 0) return;
+        squad.push_back(id);
+    }
+    int hour;
+    bool avoidSun;
+    if (!readHour(hour) || !readYesNo("  Avoid sun-exposed paths? (y/n): ", avoidSun))
+        return;
+
+    MeetupResult meet = graph.findSquadMeetup(squad, hour, avoidSun);
+    std::cout << "--------------------------------------------------------\n";
+    if (meet.meetupNodeId < 0) {
+        std::cout << "  No place can be reached by everyone.\n";
+        return;
+    }
+
+    const std::string meetName = graph.getNode(meet.meetupNodeId)->getName();
+    std::cout << "  Meet at  : " << meetName << '\n'
+              << "  " << std::string(56, '-') << '\n'
+              << "  " << std::left << std::setw(10) << "Person"
+              << std::setw(22) << "Starts at"
+              << std::right << std::setw(10) << "Meters" << std::setw(12) << "Minutes" << '\n'
+              << "  " << std::string(56, '-') << '\n'
+              << std::fixed << std::setprecision(1);
+
+    double totalMeters = 0.0, slowest = 0.0;
+    for (int i = 0; i < count; ++i) {
+        PathResult walk = graph.dijkstra(squad[i], meet.meetupNodeId, hour, avoidSun);
+        double meters, minutes;
+        measurePath(graph, walk.path, hour, meters, minutes);
+        totalMeters += meters;
+        if (minutes > slowest) slowest = minutes;
+        std::cout << "  " << std::left << std::setw(10) << ("#" + std::to_string(i + 1))
+                  << std::setw(22) << graph.getNode(squad[i])->getName()
+                  << std::right << std::setw(10) << meters
+                  << std::setw(12) << minutes << '\n';
+    }
+    std::cout << "  " << std::string(56, '-') << '\n'
+              << "  Total distance : " << totalMeters << " m\n"
+              << "  Everyone there : in about " << slowest << " min\n";
+    std::cout.unsetf(std::ios::fixed);
+    std::cout << std::setprecision(6);
+}
+
 static void printMenu() {
     std::cout << "\n--------------------- Main Menu ------------------------\n"
               << "  1. Run self-tests\n"
               << "  2. Find a place\n"
               << "  3. Route between two places\n"
+              << "  4. Squad-Sync (meeting point)\n"
               << "  0. Exit\n"
               << "--------------------------------------------------------\n";
 }
@@ -1311,7 +1382,7 @@ int main() {
     printBanner(graph, roomCount);
 
     // ---- Main menu loop ----
-    const int MAX_CHOICE = 3;
+    const int MAX_CHOICE = 4;
     while (true) {
         printMenu();
         int choice;
@@ -1324,6 +1395,7 @@ int main() {
             case 1: runSelfTests();                  break;
             case 2: findPlace(graph, names, rooms);  break;
             case 3: showRoute(graph, names);         break;
+            case 4: squadSync(graph, names);         break;
         }
     }
 
