@@ -1,4 +1,5 @@
 #include "Speedrunner.h"
+#include "CampusNode.h"
 
 // -------------------------------------------------------------- validInput ---
 // True if every rule in the header holds.  Duplicates are found with a pairwise
@@ -53,6 +54,24 @@ buildCostMatrix(const Graph& g, int startNode, int endNode,
     return cost;
 }
 
+// ---------------------------------------------------------- addServiceWait ---
+// Arriving at an errand that is a ServiceFacility means queueing there too,
+// so its estimated wait is added to every leg that ends at it (column j for
+// point j = 1..k).  Other node types (rooms, corridors) add nothing.
+static void addServiceWait(const Graph& g, const std::vector<int>& errands,
+                           std::vector<std::vector<double>>& cost) {
+    const int k = static_cast<int>(errands.size());
+    for (int j = 1; j <= k; ++j) {
+        const ServiceFacility* facility =
+            dynamic_cast<const ServiceFacility*>(g.getNode(errands[j - 1]));
+        if (facility == nullptr)
+            continue;
+        double wait = facility->getEstimatedWaitMinutes();
+        for (int i = 0; i <= k; ++i)
+            cost[i][j] += wait;                         // inf + wait = inf
+    }
+}
+
 // --------------------------------------------------------------- planBreak ---
 SpeedrunResult planBreak(const Graph& g, int startNode, int endNode,
                          const std::vector<int>& errands,
@@ -67,6 +86,7 @@ SpeedrunResult planBreak(const Graph& g, int startNode, int endNode,
     std::vector<std::vector<double>> cost =
         buildCostMatrix(g, startNode, endNode, errands,
                         currentHour, avoidSun, walkMetersPerMin);
+    addServiceWait(g, errands, cost);
 
     // Choosing the order is added in the next steps.
     (void)cost;
