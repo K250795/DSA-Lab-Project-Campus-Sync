@@ -1248,6 +1248,10 @@ static void showRoute(const Graph& graph, const PrefixTrie& names) {
     if (start < 0) return;
     int end = pickNode(graph, names, "Destination");
     if (end < 0) return;
+    if (start == end) {                         // nothing to route
+        std::cout << "  You're already at " << graph.getNode(start)->getName() << ".\n";
+        return;
+    }
     int hour;
     bool avoidSun;
     if (!readHour(hour) || !readYesNo("  Avoid sun-exposed paths? (y/n): ", avoidSun))
