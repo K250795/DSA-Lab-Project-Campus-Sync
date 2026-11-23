@@ -1,7 +1,17 @@
 #pragma once
+#include <string>
 #include <vector>
 #include "Graph.h"
 #include "RoomAvailability.h"
+
+// One ranked bunker suggestion.
+struct BunkerResult {
+    int         roomId;
+    std::string name;
+    double      score;      // utility score (see BunkerRadar formula)
+    double      distance;   // walking cost from the user's node, meters
+    int         freeHours;  // consecutive free hours from the query hour
+};
 
 // "Bunker Radar": finds empty academic rooms a student can sit in.
 //
@@ -43,6 +53,15 @@ public:
 
     // Apply the documented formula to raw inputs.
     static double utilityScore(int freeHours, double distanceMeters);
+
+    // Rank every room free at 'hour' by utility score for a user standing at
+    // 'userNode' and return the best 'topN', highest score first.
+    // Rooms unreachable from 'userNode' are skipped.  Returns an empty vector
+    // if no room is free, 'hour' is outside 8-15, 'topN' <= 0, or 'userNode'
+    // is not a valid node.  Rooms with equal scores come out in an
+    // unspecified order.
+    std::vector<BunkerResult> topRooms(int userNode, int hour, int topN,
+                                       bool avoidSun = false) const;
 
 private:
     const Graph&            graph_;
