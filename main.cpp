@@ -1136,6 +1136,17 @@ static int pickNode(const Graph& graph, const PrefixTrie& names,
         if (prefix.empty())
             return -1;
 
+        // The trie ignores punctuation, so "!!!" would search for "" and
+        // list every place.  Require at least one letter or digit.
+        bool hasAlnum = false;
+        for (char c : prefix)
+            if (std::isalnum(static_cast<unsigned char>(c)))
+                hasAlnum = true;
+        if (!hasAlnum) {
+            std::cout << "    Type at least one letter or digit of the name.\n";
+            continue;
+        }
+
         std::vector<std::pair<std::string, int>> matches = names.autocomplete(prefix);
         if (matches.empty()) {
             std::cout << "    No place starts with \"" << prefix << "\". Try again.\n";
