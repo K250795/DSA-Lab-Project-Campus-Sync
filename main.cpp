@@ -9,6 +9,8 @@
 #include <fstream>   // temporary CSV in testSchedulerCsv
 #include <cstdio>    // std::remove
 #include <cmath>     // std::abs
+#include <iomanip>   // std::setw for aligned menu columns
+#include <utility>   // std::pair
 
 #include "MinHeap.h"
 #include "MaxHeap.h"
@@ -1120,9 +1122,83 @@ static void printBanner(const Graph& graph, int roomCount) {
               << roomCount << " bookable rooms.\n";
 }
 
+// ---------------------------------------------------------------- pickNode ---
+// Shared by every option that needs a location.  The user types part of a
+// name; PrefixTrie::autocomplete lists the matches, numbered, and the user
+// picks one.  Typing nothing cancels.
+// Returns the chosen node id, or -1 if the user cancelled or input ended.
+static int pickNode(const Graph& graph, const PrefixTrie& names,
+                    const std::string& what) {
+    std::string prefix;
+    while (readLine("  " + what + " - type part of a name (Enter to cancel): ",
+                    prefix)) {
+        if (prefix.empty())
+            return -1;
+
+        std::vector<std::pair<std::string, int>> matches = names.autocomplete(prefix);
+        if (matches.empty()) {
+            std::cout << "    No place starts with \"" << prefix << "\". Try again.\n";
+            continue;
+        }
+
+        const int count = static_cast<int>(matches.size());
+        for (int i = 0; i < count; ++i) {
+            const CampusNode* node = graph.getNode(matches[i].second);
+            std::cout << "    " << std::setw(2) << (i + 1) << ". "
+                      << std::left << std::setw(20) << node->getName()
+                      << std::right << " (" << node->getType() << ")\n";
+        }
+        if (count == 1) {                               // nothing to choose
+            std::cout << "    -> " << graph.getNode(matches[0].second)->getName() << '\n';
+            return matches[0].second;
+        }
+
+        int pick;
+        if (!readInt("  Pick 1-" + std::to_string(count) + " (0 to search again): ",
+                     0, count, pick))
+            return -1;
+        if (pick != 0)
+            return matches[pick - 1].second;
+    }
+    return -1;
+}
+
+// ------------------------------------------------------------- findPlace ---
+// Menu option: look a place up by name and show what we know about it.
+static void findPlace(const Graph& graph, const PrefixTrie& names,
+                      const RoomAvailability& rooms) {
+    std::cout << "\n==================== Find a place ======================\n";
+    int id = pickNode(graph, names, "Place");
+    if (id < 0)
+        return;
+
+    const CampusNode* node = graph.getNode(id);
+    std::cout << "--------------------------------------------------------\n"
+              << "  Name     : " << node->getName() << '\n'
+              << "  Type     : " << node->getType() << '\n'
+              << "  Node id  : " << id << '\n'
+              << "  Position : (" << node->getX() << ", " << node->getY() << ")\n"
+              << "  Paths to : " << graph.getNeighbors(id).size() << " places\n";
+
+    if (rooms.hasRoom(id)) {
+        std::cout << "  Free at  :";
+        int freeCount = 0;
+        for (int hour = 8; hour <= 15; ++hour)
+            if (rooms.isFreeAtHour(id, hour)) {
+                std::cout << ' ' << (hour < 10 ? "0" : "") << hour << ":00";
+                ++freeCount;
+            }
+        std::cout << (freeCount == 0 ? " never (booked all day)" : "") << '\n';
+    }
+    if (const ServiceFacility* facility = dynamic_cast<const ServiceFacility*>(node))
+        std::cout << "  Queue    : about " << facility->getEstimatedWaitMinutes()
+                  << " min wait\n";
+}
+
 static void printMenu() {
     std::cout << "\n--------------------- Main Menu ------------------------\n"
               << "  1. Run self-tests\n"
+              << "  2. Find a place\n"
               << "  0. Exit\n"
               << "--------------------------------------------------------\n";
 }
@@ -1150,7 +1226,7 @@ int main() {
     printBanner(graph, roomCount);
 
     // ---- Main menu loop ----
-    const int MAX_CHOICE = 1;
+    const int MAX_CHOICE = 2;
     while (true) {
         printMenu();
         int choice;
@@ -1160,7 +1236,8 @@ int main() {
             break;
 
         switch (choice) {
-            case 1: runSelfTests(); break;
+            case 1: runSelfTests();                  break;
+            case 2: findPlace(graph, names, rooms);  break;
         }
     }
 
