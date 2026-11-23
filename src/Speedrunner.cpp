@@ -114,6 +114,28 @@ static void searchOrders(OrderSearch& s, int pos, int prev, double soFar) {
     }
 }
 
+// ----------------------------------------------------------- buildFullPath ---
+// Stitch start -> errand 1 -> ... -> errand k -> end together with one
+// Graph::dijkstra call per leg.  Each leg's path begins with the node the
+// previous leg ended on, so that first node is skipped to avoid repeats.
+static std::vector<int> buildFullPath(const Graph& g, int startNode, int endNode,
+                                      const std::vector<int>& visitOrder,
+                                      int currentHour, bool avoidSun) {
+    std::vector<int> stops;
+    stops.push_back(startNode);
+    for (int id : visitOrder)
+        stops.push_back(id);
+    stops.push_back(endNode);
+
+    std::vector<int> fullPath{startNode};
+    for (std::size_t i = 0; i + 1 < stops.size(); ++i) {
+        PathResult leg = g.dijkstra(stops[i], stops[i + 1], currentHour, avoidSun);
+        for (std::size_t j = 1; j < leg.path.size(); ++j)
+            fullPath.push_back(leg.path[j]);
+    }
+    return fullPath;
+}
+
 // --------------------------------------------------------------- planBreak ---
 SpeedrunResult planBreak(const Graph& g, int startNode, int endNode,
                          const std::vector<int>& errands,
@@ -130,21 +152,30 @@ SpeedrunResult planBreak(const Graph& g, int startNode, int endNode,
                         currentHour, avoidSun, walkMetersPerMin);
     addServiceWait(g, errands, cost);
 
-    // Try every order of the errands, pruning past the break length.
-    const int k = static_cast<int>(errands.size());
-    OrderSearch search{cost, k, double(breakEndMin - breakStartMin),
-                       std::vector<int>(k), {},
-                       std::numeric_limits<double>::infinity()};
+    // Pass 1: try every order, pruning anything longer than the break.
+    const int    k        = static_cast<int>(errands.size());
+    const double INF      = std::numeric_limits<double>::infinity();
+    const double breakLen = breakEndMin - breakStartMin;
+    OrderSearch search{cost, k, breakLen, std::vector<int>(k), {}, INF};
     for (int i = 0; i < k; ++i)
         search.order[i] = i + 1;                        // errand points 1..k
     searchOrders(search, 0, 0, 0.0);                    // start at point 0
 
-    if (search.bestTotal == std::numeric_limits<double>::infinity())
-        return result;                                  // nothing fits
+    // Pass 2 (only if nothing fit): drop the break limit so we still learn
+    // the best order and how long it takes.  Only best-so-far pruning is left.
+    if (search.bestTotal == INF) {
+        search.limit = INF;
+        searchOrders(search, 0, 0, 0.0);
+    }
+    if (search.bestTotal == INF)
+        return result;                                  // some stop unreachable
 
     for (int p : search.bestOrder)
         result.visitOrder.push_back(errands[p - 1]);    // point -> node id
     result.totalMinutes = search.bestTotal;
-    result.feasible     = true;
+    result.feasible     = search.bestTotal <= breakLen;
+
+    result.fullPath = buildFullPath(g, startNode, endNode, result.visitOrder,
+                                    currentHour, avoidSun);
     return result;
 }
