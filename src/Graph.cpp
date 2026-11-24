@@ -40,10 +40,12 @@ bool Graph::loadNodes(const std::string& filepath) {
         std::stringstream ss(line);
         std::string token;
 
-        // format: id,name,type,x,y,schedule
+        // format: id,name,type,building,floor,x,y,schedule
         int id = -1;
         std::string name;
         std::string type;
+        std::string building = "-";
+        std::string floor = "-";
         double x = 0.0;
         double y = 0.0;
         std::string schedule = "00000000";
@@ -51,6 +53,8 @@ bool Graph::loadNodes(const std::string& filepath) {
         if (std::getline(ss, token, ',')) id = std::stoi(token);
         if (std::getline(ss, name, ',')) {}
         if (std::getline(ss, type, ',')) {}
+        if (std::getline(ss, building, ',')) {}
+        if (std::getline(ss, floor, ',')) {}
         if (std::getline(ss, token, ',')) x = std::stod(token);
         if (std::getline(ss, token, ',')) y = std::stod(token);
         if (std::getline(ss, schedule, ',')) {}
@@ -70,6 +74,7 @@ bool Graph::loadNodes(const std::string& filepath) {
         } else {
             node = new TransitNode(id, name, x, y);
         }
+        node->setLocation(building, floor);
 
         if (nodes_[id] != nullptr) {
             delete nodes_[id];

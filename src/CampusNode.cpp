@@ -21,6 +21,19 @@ double CampusNode::getY() const {
     return y;
 }
 
+const std::string& CampusNode::getBuilding() const {
+    return building_;
+}
+
+const std::string& CampusNode::getFloor() const {
+    return floor_;
+}
+
+void CampusNode::setLocation(const std::string& building, const std::string& floor) {
+    building_ = building;
+    floor_    = floor;
+}
+
 // ============================================================= AcademicRoom ==
 AcademicRoom::AcademicRoom(int id, const std::string& name, double xVal, double yVal, const std::string& scheduleStr)
     : CampusNode(id, name, xVal, yVal) {

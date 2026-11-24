@@ -13,6 +13,11 @@ public:
     double getX() const;
     double getY() const;
 
+    // Building and floor ("-" for outdoor places), set by the CSV loader.
+    const std::string& getBuilding() const;
+    const std::string& getFloor() const;
+    void setLocation(const std::string& building, const std::string& floor);
+
     virtual std::string getType() const = 0;
 
 protected:
@@ -20,6 +25,8 @@ protected:
     std::string nodeName;
     double x;
     double y;
+    std::string building_ = "-";
+    std::string floor_    = "-";
 };
 
 // Derived class: AcademicRoom
