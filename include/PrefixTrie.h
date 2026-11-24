@@ -3,9 +3,9 @@
 #include <vector>
 #include <utility>   // std::pair
 
-// Fixed alphabet: 'a'-'z' (0-25), '0'-'9' (26-35), ' ' (36).
+// Fixed alphabet: 'a'-'z' (0-25), '0'-'9' (26-35), ' ' (36), '-' (37).
 // Letters are lowercased before use, so lookups are case-insensitive.
-static constexpr int ALPHA_SIZE = 37;
+static constexpr int ALPHA_SIZE = 38;
 
 // A single node in the prefix trie.
 struct TrieNode {
@@ -23,10 +23,10 @@ struct TrieNode {
 // to integer campus-node IDs.
 //
 // Rules:
-//   - Alphabet is a-z, 0-9 and space after lowercasing, so "Lab 1" and
-//     "Lab 2" are different keys.  Runs of whitespace collapse to a single
-//     space, leading/trailing whitespace is trimmed, and any other character
-//     (punctuation) is dropped.
+//   - Alphabet is a-z, 0-9, space and hyphen after lowercasing, so "Lab 1",
+//     "Lab 10" and "LLC-1" are all different keys.  Runs of whitespace
+//     collapse to a single space, leading/trailing whitespace is trimmed,
+//     and any other punctuation is dropped.
 //   - Destructor uses a post-order recursive traversal to free every node.
 //   - No STL containers other than std::string and std::vector used internally.
 class PrefixTrie {

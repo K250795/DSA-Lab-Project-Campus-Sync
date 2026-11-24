@@ -1125,6 +1125,18 @@ static void printBanner(const Graph& graph, int roomCount) {
               << roomCount << " bookable rooms.\n";
 }
 
+// ------------------------------------------------------------- locationTag ---
+// "[EE, Floor D]", "[CS, Basement]", "[MPB, Ground]" or "[Outdoor]".
+static std::string locationTag(const CampusNode* node) {
+    const std::string& b = node->getBuilding();
+    const std::string& f = node->getFloor();
+    if (b == "-")
+        return "[Outdoor]";
+    if (f == "Basement" || f == "Ground")
+        return "[" + b + ", " + f + "]";
+    return "[" + b + ", Floor " + f + "]";
+}
+
 // ---------------------------------------------------------------- pickNode ---
 // Shared by every option that needs a location.  The user types part of a
 // name; PrefixTrie::autocomplete lists the matches, numbered, and the user
@@ -1138,7 +1150,7 @@ static int pickNode(const Graph& graph, const PrefixTrie& names,
         if (prefix.empty())
             return -1;
 
-        // The trie ignores punctuation, so "!!!" would search for "" and
+        // The trie drops most punctuation, so "!!!" would search for "" and
         // list every place.  Require at least one letter or digit.
         bool hasAlnum = false;
         for (char c : prefix)
@@ -1159,11 +1171,13 @@ static int pickNode(const Graph& graph, const PrefixTrie& names,
         for (int i = 0; i < count; ++i) {
             const CampusNode* node = graph.getNode(matches[i].second);
             std::cout << "    " << std::setw(2) << (i + 1) << ". "
-                      << std::left << std::setw(20) << node->getName()
-                      << std::right << " (" << node->getType() << ")\n";
+                      << std::left << std::setw(18) << node->getName()
+                      << std::setw(18) << locationTag(node)
+                      << std::right << node->getType() << '\n';
         }
         if (count == 1) {                               // nothing to choose
-            std::cout << "    -> " << graph.getNode(matches[0].second)->getName() << '\n';
+            const CampusNode* only = graph.getNode(matches[0].second);
+            std::cout << "    -> " << only->getName() << ' ' << locationTag(only) << '\n';
             return matches[0].second;
         }
 
@@ -1190,6 +1204,7 @@ static void findPlace(const Graph& graph, const PrefixTrie& names,
     std::cout << "--------------------------------------------------------\n"
               << "  Name     : " << node->getName() << '\n'
               << "  Type     : " << node->getType() << '\n'
+              << "  Location : " << locationTag(node) << '\n'
               << "  Node id  : " << id << '\n'
               << "  Position : (" << node->getX() << ", " << node->getY() << ")\n"
               << "  Paths to : " << graph.getNeighbors(id).size() << " places\n";

@@ -65,9 +65,9 @@ PrefixTrie::autocomplete(const std::string& prefix) const {
 // ---------------------------------------------------------------- private --
 
 // --------------------------------------------------------------- normalize ---
-// Lowercase letters, keep digits, collapse any whitespace run into a single
-// space, trim both ends, and drop everything else (punctuation).
-// e.g. "  CS   Lab-1 " -> "cs lab1"
+// Lowercase letters, keep digits and hyphens, collapse any whitespace run into
+// a single space, trim both ends, and drop all other punctuation.
+// e.g. "  LLC-1 " -> "llc-1", "Lab.10" -> "lab10"
 std::string PrefixTrie::normalize(const std::string& s) {
     std::string out;
     out.reserve(s.size());
@@ -79,8 +79,8 @@ std::string PrefixTrie::normalize(const std::string& s) {
             pendingSpace = true;
             continue;
         }
-        if (!std::isalpha(uc) && !std::isdigit(uc))
-            continue;                            // punctuation is ignored
+        if (!std::isalpha(uc) && !std::isdigit(uc) && c != '-')
+            continue;                            // other punctuation is ignored
 
         if (pendingSpace && !out.empty())        // no leading space
             out += ' ';
@@ -91,10 +91,12 @@ std::string PrefixTrie::normalize(const std::string& s) {
 }
 
 // ------------------------------------------------------------- charToIndex ---
-// 'a'-'z' -> 0-25, '0'-'9' -> 26-35, ' ' -> 36.  Input is already normalized.
+// 'a'-'z' -> 0-25, '0'-'9' -> 26-35, ' ' -> 36, '-' -> 37.
+// Input is already normalized.
 int PrefixTrie::charToIndex(char c) {
     if (c >= 'a' && c <= 'z') return c - 'a';
     if (c >= '0' && c <= '9') return 26 + (c - '0');
+    if (c == '-') return 37;
     return 36;                                   // the only other char is ' '
 }
 
@@ -102,6 +104,7 @@ int PrefixTrie::charToIndex(char c) {
 char PrefixTrie::indexToChar(int idx) {
     if (idx < 26) return static_cast<char>('a' + idx);
     if (idx < 36) return static_cast<char>('0' + (idx - 26));
+    if (idx == 37) return '-';
     return ' ';
 }
 
