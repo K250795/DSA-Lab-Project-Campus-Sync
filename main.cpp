@@ -1224,24 +1224,11 @@ static void findPlace(const Graph& graph, const PrefixTrie& names,
                   << " min wait\n";
 }
 
-// --------------------------------------------------------- readHour/readYesNo ---
+// ----------------------------------------------------------------- readHour ---
 static const double WALK_METERS_PER_MIN = 80.0;   // same pace as Speedrunner
 
 static bool readHour(int& hour) {
     return readInt("  Hour of day (8-15): ", 8, 15, hour);
-}
-
-// Ask until the user types y/yes or n/no (any case).
-static bool readYesNo(const std::string& prompt, bool& answer) {
-    std::string line;
-    while (readLine(prompt, line)) {
-        for (char& c : line)
-            c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-        if (line == "y" || line == "yes") { answer = true;  return true; }
-        if (line == "n" || line == "no")  { answer = false; return true; }
-        std::cout << "  Please answer y or n.\n";
-    }
-    return false;
 }
 
 // The edge from 'from' to 'to', or nullptr if they are not adjacent.
@@ -1252,13 +1239,63 @@ static const Edge* findEdge(const Graph& graph, int from, int to) {
     return nullptr;
 }
 
+// ------------------------------------------------------- floors and stairs ---
+// Height order of a floor: Basement < Ground/A < 1/B < ...
+static int floorRank(const std::string& floor) {
+    if (floor == "Basement") return -1;
+    if (floor == "Ground")   return 0;
+    if (floor.size() == 1 && floor[0] >= 'A' && floor[0] <= 'Z')
+        return floor[0] - 'A';                      // EE: A is ground
+    bool digits = !floor.empty();
+    for (char c : floor)
+        if (c < '0' || c > '9') digits = false;
+    return digits ? std::stoi(floor) : 0;
+}
+
+// Rooms only link to their own floor hub, so an edge between two nodes of the
+// same building on different floors is a flight of stairs.
+static bool isStairs(const Graph& graph, int a, int b) {
+    const CampusNode* na = graph.getNode(a);
+    const CampusNode* nb = graph.getNode(b);
+    return na->getBuilding() != "-" && na->getBuilding() == nb->getBuilding()
+        && na->getFloor() != nb->getFloor();
+}
+
+// Path as names, with each run of stairs collapsed, e.g.
+// "EE Floor D -> (stairs down 3) -> EE Floor A".  Counts the floors changed.
+static std::string describePath(const Graph& graph, const std::vector<int>& path,
+                                int& floorChanges) {
+    floorChanges = 0;
+    if (path.empty())
+        return "";
+    std::string out = graph.getNode(path[0])->getName();
+    std::size_t i = 0;
+    while (i + 1 < path.size()) {
+        if (!isStairs(graph, path[i], path[i + 1])) {
+            out += " -> " + graph.getNode(path[i + 1])->getName();
+            ++i;
+            continue;
+        }
+        std::size_t j = i;
+        while (j + 1 < path.size() && isStairs(graph, path[j], path[j + 1]))
+            ++j;
+        int delta = floorRank(graph.getNode(path[j])->getFloor())
+                  - floorRank(graph.getNode(path[i])->getFloor());
+        floorChanges += static_cast<int>(j - i);
+        out += std::string(" -> (stairs ") + (delta > 0 ? "up " : "down ")
+             + std::to_string(delta > 0 ? delta : -delta) + ") -> "
+             + graph.getNode(path[j])->getName();
+        i = j;
+    }
+    return out;
+}
+
 // ---------------------------------------------------------------- showRoute ---
 // Menu option: shortest route between two places with Graph::dijkstra.
 //
-// Dijkstra minimises the *weighted* cost (rush-hour crowding, plus a 2.5x
-// penalty on outdoor paths when avoiding sun).  The table shows each leg's
-// real length, and the time estimate uses the rush-hour weight only: the sun
-// penalty changes which way you go, not how fast you walk.
+// Dijkstra minimises the rush-hour weighted cost; sun avoidance is off.
+// Distance is the real metres (stairs count as 20 m each); time uses the
+// rush-hour weight at 80 m/min.
 static void showRoute(const Graph& graph, const PrefixTrie& names) {
     std::cout << "\n============ Route between two places ==================\n";
     int start = pickNode(graph, names, "Start");
@@ -1270,11 +1307,10 @@ static void showRoute(const Graph& graph, const PrefixTrie& names) {
         return;
     }
     int hour;
-    bool avoidSun;
-    if (!readHour(hour) || !readYesNo("  Avoid sun-exposed paths? (y/n): ", avoidSun))
+    if (!readHour(hour))
         return;
 
-    PathResult route = graph.dijkstra(start, end, hour, avoidSun);
+    PathResult route = graph.dijkstra(start, end, hour, false);
     std::cout << "--------------------------------------------------------\n";
     if (route.path.empty()) {
         std::cout << "  No walkable route from " << graph.getNode(start)->getName()
@@ -1282,28 +1318,24 @@ static void showRoute(const Graph& graph, const PrefixTrie& names) {
         return;
     }
 
-    std::cout << "  " << std::left << std::setw(4) << "#"
-              << std::setw(22) << "From" << std::setw(22) << "To"
-              << std::right << std::setw(8) << "Meters" << "\n"
-              << "  " << std::string(56, '-') << '\n';
     double meters = 0.0, walkCost = 0.0;
     for (std::size_t i = 0; i + 1 < route.path.size(); ++i) {
         const Edge* e = findEdge(graph, route.path[i], route.path[i + 1]);
         meters   += e->distance;
         walkCost += graph.calculateWeight(*e, hour, false);
-        std::cout << "  " << std::left << std::setw(4) << (i + 1)
-                  << std::setw(22) << graph.getNode(route.path[i])->getName()
-                  << std::setw(22) << graph.getNode(route.path[i + 1])->getName()
-                  << std::right << std::setw(8) << e->distance
-                  << (e->isOutdoor ? "  (outdoor)" : "") << '\n';
     }
+    int floorChanges;
+    std::string summary = describePath(graph, route.path, floorChanges);
 
-    std::cout << "  " << std::string(56, '-') << '\n'
+    std::cout << "  From     : " << graph.getNode(start)->getName() << ' '
+              << locationTag(graph.getNode(start)) << '\n'
+              << "  To       : " << graph.getNode(end)->getName() << ' '
+              << locationTag(graph.getNode(end)) << '\n'
+              << "  Path     : " << summary << '\n'
+              << "  Floors   : " << floorChanges
+              << (floorChanges == 1 ? " floor change\n" : " floor changes\n")
               << std::fixed << std::setprecision(1)
-              << "  Path     : ";
-    for (std::size_t i = 0; i < route.path.size(); ++i)
-        std::cout << (i ? " -> " : "") << graph.getNode(route.path[i])->getName();
-    std::cout << "\n  Distance : " << meters << " m\n"
+              << "  Distance : " << meters << " m\n"
               << "  Time     : about " << walkCost / WALK_METERS_PER_MIN
               << " min at " << WALK_METERS_PER_MIN << " m/min"
               << (hour >= 11 && hour <= 14 ? " (rush hour)" : "") << '\n';
@@ -1342,8 +1374,8 @@ static void squadSync(const Graph& graph, const PrefixTrie& names) {
         squad.push_back(id);
     }
     int hour;
-    bool avoidSun;
-    if (!readHour(hour) || !readYesNo("  Avoid sun-exposed paths? (y/n): ", avoidSun))
+    const bool avoidSun = false;                 // sun avoidance is not offered
+    if (!readHour(hour))
         return;
 
     MeetupResult meet = graph.findSquadMeetup(squad, hour, avoidSun);
@@ -1354,7 +1386,8 @@ static void squadSync(const Graph& graph, const PrefixTrie& names) {
     }
 
     const std::string meetName = graph.getNode(meet.meetupNodeId)->getName();
-    std::cout << "  Meet at  : " << meetName << '\n'
+    std::cout << "  Meet at  : " << meetName << ' '
+              << locationTag(graph.getNode(meet.meetupNodeId)) << '\n'
               << "  " << std::string(56, '-') << '\n'
               << "  " << std::left << std::setw(10) << "Person"
               << std::setw(22) << "Starts at"
@@ -1407,17 +1440,19 @@ static void bunkerRadar(const Graph& graph, const PrefixTrie& names,
     std::cout << "  Free rooms at " << (hour < 10 ? "0" : "") << hour << ":00 near "
               << graph.getNode(here)->getName() << ":\n"
               << "  " << std::string(56, '-') << '\n'
-              << "  " << std::left << std::setw(4) << "#" << std::setw(20) << "Room"
-              << std::right << std::setw(8) << "Score" << std::setw(12) << "Distance"
-              << std::setw(12) << "Free for" << '\n'
+              << "  " << std::left << std::setw(4) << "#" << std::setw(8) << "Room"
+              << std::setw(16) << "Where"
+              << std::right << std::setw(7) << "Score" << std::setw(12) << "Distance"
+              << std::setw(10) << "Free for" << '\n'
               << "  " << std::string(56, '-') << '\n'
               << std::fixed << std::setprecision(1);
     for (std::size_t i = 0; i < top.size(); ++i) {
         const BunkerResult& r = top[i];
         int untilHour = hour + r.freeHours;
         std::cout << "  " << std::left << std::setw(4) << (i + 1)
-                  << std::setw(20) << r.name
-                  << std::right << std::setw(8) << r.score
+                  << std::setw(8) << r.name
+                  << std::setw(16) << locationTag(graph.getNode(r.roomId))
+                  << std::right << std::setw(7) << r.score
                   << std::setw(10) << r.distance << " m"
                   << std::setw(7) << r.freeHours << " h"
                   << "  (until " << (untilHour < 10 ? "0" : "") << untilHour << ":00)\n";
@@ -1444,11 +1479,12 @@ static bool readTime(const std::string& prompt, int& minutes) {
     return false;
 }
 
-// One schedule line: "HH:MM - HH:MM  Title  @ Location".
+// One schedule line: "HH:MM - HH:MM  Title  @ Location [Building, Floor]".
 static void printEvent(const Graph& graph, const ScheduleItem& item) {
+    const CampusNode* where = graph.getNode(item.locationId);
     std::cout << minutesToTime(item.startMin) << " - " << minutesToTime(item.endMin)
-              << "  " << std::left << std::setw(26) << item.title << std::right
-              << " @ " << graph.getNode(item.locationId)->getName() << '\n';
+              << "  " << std::left << std::setw(22) << item.title << std::right
+              << " @ " << where->getName() << ' ' << locationTag(where) << '\n';
 }
 
 // ------------------------------------------------------------- mySchedule ---
@@ -1577,10 +1613,11 @@ static void nextClass(const Graph& graph, const PrefixTrie& names, const Schedul
 
     double meters, minutes;
     measurePath(graph, route.path, hour, meters, minutes);
-    std::cout << "  Path     : ";
-    for (std::size_t i = 0; i < route.path.size(); ++i)
-        std::cout << (i ? " -> " : "") << graph.getNode(route.path[i])->getName();
-    std::cout << std::fixed << std::setprecision(1)
+    int floorChanges;
+    std::cout << "  Path     : " << describePath(graph, route.path, floorChanges) << '\n'
+              << "  Floors   : " << floorChanges
+              << (floorChanges == 1 ? " floor change" : " floor changes")
+              << std::fixed << std::setprecision(1)
               << "\n  Distance : " << meters << " m\n"
               << "  Walk     : about " << minutes << " min\n";
 
@@ -1635,8 +1672,8 @@ static void planABreak(const Graph& graph, const PrefixTrie& names) {
     }
 
     int hour;
-    bool avoidSun;
-    if (!readHour(hour) || !readYesNo("  Avoid sun-exposed paths? (y/n): ", avoidSun))
+    const bool avoidSun = false;                 // sun avoidance is not offered
+    if (!readHour(hour))
         return;
 
     SpeedrunResult plan = planBreak(graph, start, end, errands,
@@ -1650,11 +1687,14 @@ static void planABreak(const Graph& graph, const PrefixTrie& names) {
     std::cout << "  Visit order :";
     if (plan.visitOrder.empty())
         std::cout << " (no errands, go straight there)";
-    for (std::size_t i = 0; i < plan.visitOrder.size(); ++i)
-        std::cout << (i ? " ->" : "") << ' ' << graph.getNode(plan.visitOrder[i])->getName();
-    std::cout << "\n  Full path   : ";
-    for (std::size_t i = 0; i < plan.fullPath.size(); ++i)
-        std::cout << (i ? " -> " : "") << graph.getNode(plan.fullPath[i])->getName();
+    for (std::size_t i = 0; i < plan.visitOrder.size(); ++i) {
+        const CampusNode* stop = graph.getNode(plan.visitOrder[i]);
+        std::cout << "\n    " << (i + 1) << ". " << stop->getName() << ' ' << locationTag(stop);
+    }
+    int floorChanges;
+    std::cout << "\n  Full path   : " << describePath(graph, plan.fullPath, floorChanges)
+              << "\n  Floors      : " << floorChanges
+              << (floorChanges == 1 ? " floor change" : " floor changes");
 
     const int breakLen = breakEnd - breakStart;
     std::cout << std::fixed << std::setprecision(1)
