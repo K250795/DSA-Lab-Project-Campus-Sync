@@ -8,6 +8,7 @@
 #include <stdexcept>
 #include <fstream>   // temporary CSV in testSchedulerCsv
 #include <cstdio>    // std::remove
+#include <limits>    // std::numeric_limits
 #include <cmath>     // std::abs
 #include <iomanip>   // std::setw for aligned menu columns
 #include <utility>   // std::pair
@@ -338,6 +339,53 @@ static std::string titlesOf(const DoublyLinkedList& list) {
     return out;
 }
 
+// ===================================================== campus test helpers ===
+// Node id by exact name; the tests look places up by name, never by raw id.
+static int idOf(const Graph& g, const std::string& name) {
+    for (int i = 0; i < g.getNodeCount(); ++i)
+        if (g.getNode(i) != nullptr && g.getNode(i)->getName() == name)
+            return i;
+    assert(false && "unknown campus node name");
+    return -1;
+}
+
+// The edge a -> b, or nullptr if they are not adjacent.
+static const Edge* edgeBetween(const Graph& g, int a, int b) {
+    for (const Edge& e : g.getNeighbors(a))
+        if (e.to == b)
+            return &e;
+    return nullptr;
+}
+
+// True if every consecutive pair in 'path' is joined by an edge.
+static bool isWalkablePath(const Graph& g, const std::vector<int>& path) {
+    for (std::size_t i = 0; i + 1 < path.size(); ++i)
+        if (edgeBetween(g, path[i], path[i + 1]) == nullptr)
+            return false;
+    return true;
+}
+
+// Sum of Graph::calculateWeight over the path's edges.
+static double pathCost(const Graph& g, const std::vector<int>& path, int hour, bool sun) {
+    double total = 0.0;
+    for (std::size_t i = 0; i + 1 < path.size(); ++i)
+        total += g.calculateWeight(*edgeBetween(g, path[i], path[i + 1]), hour, sun);
+    return total;
+}
+
+// Number of stairs flights on the path (same building, different floor).
+static int stairsIn(const Graph& g, const std::vector<int>& path) {
+    int count = 0;
+    for (std::size_t i = 0; i + 1 < path.size(); ++i) {
+        const CampusNode* a = g.getNode(path[i]);
+        const CampusNode* b = g.getNode(path[i + 1]);
+        if (a->getBuilding() != "-" && a->getBuilding() == b->getBuilding()
+            && a->getFloor() != b->getFloor())
+            ++count;
+    }
+    return count;
+}
+
 static void testScheduler() {
     section("Scheduler (auto-snapshot, undo, redo)");
 
@@ -442,8 +490,8 @@ static void testSchedulerCsv() {
     assert(day.getSkippedCount() == 0);
     assert(day.getSchedule().size() == 5);
     assert(titlesOf(day.getSchedule()) ==
-           "Data Structures Lecture|Linear Algebra|Lunch Break|"
-           "Data Structures Lab|Digital Logic Design");
+           "Digital Logic Design|Linear Algebra|Data Structures|"
+           "Lunch Break|Data Structures Lab");
     int prevStart = -1;
     for (DLLNode* cur = day.getSchedule().head(); cur != nullptr; cur = cur->next) {
         assert(cur->data.startMin > prevStart);                  // sorted
@@ -452,14 +500,16 @@ static void testSchedulerCsv() {
     }
     DLLNode* first = day.getSchedule().head();
     assert(first->data.startMin == timeToMinutes("08:00"));
-    assert(first->data.endMin   == timeToMinutes("09:30"));
-    assert(first->data.locationId == 2);
+    assert(first->data.endMin   == timeToMinutes("08:50"));
+    assert(first->data.locationId == idOf(graph, "C15"));
+    assert(day.getSchedule().tail()->data.locationId == idOf(graph, "Lab 2"));
     ok("data/schedule.csv: 5 events, start-time order, 0 skipped");
 
     // Loading pushes no snapshots; later edits are still undoable.
     assert(!day.undo());
     assert(day.getSchedule().size() == 5);
-    ScheduleItem gym{"Sports Practice", timeToMinutes("16:00"), timeToMinutes("17:00"), 10};
+    ScheduleItem gym{"Sports Practice", timeToMinutes("16:00"), timeToMinutes("17:00"),
+                     idOf(graph, "Sports Room")};
     assert(day.addEvent(gym));
     assert(day.undo());
     assert(day.getSchedule().size() == 5);
@@ -467,6 +517,7 @@ static void testSchedulerCsv() {
     ok("Initial load cannot be undone; later edits still can");
 
     // Bad rows: write a temporary CSV, load it, then delete it.
+    // Ids 2 and 3 exist (junctions); 99 is past the last node.
     const std::string tmpPath = "data/tmp_bad_schedule.csv";
     {
         std::ofstream out(tmpPath);
@@ -485,6 +536,7 @@ static void testSchedulerCsv() {
             << "\n"                                   // blank: ignored
             << "Good Late,10:00,11:00,3\r\n";         // Windows ending
     }
+    assert(graph.getNode(99) == nullptr);
     Scheduler bad;
     bool loaded = bad.loadFromCsv(tmpPath, graph);
     std::remove(tmpPath.c_str());
@@ -498,8 +550,8 @@ static void testSchedulerCsv() {
     ok("Bad rows skipped and counted (9), good rows kept, temp file deleted");
 
     // A second load adds to the existing schedule and resets the counter:
-    // the Lecture (08:00) clashes with Good Early and Linear Algebra (09:45)
-    // clashes with Good Late; the other 3 rows fit.
+    // Digital Logic Design (08:00) clashes with Good Early and Data Structures
+    // (10:00) clashes with Good Late; the other 3 rows fit.
     assert(bad.loadFromCsv("data/schedule.csv", graph));
     assert(bad.getSkippedCount() == 2);
     assert(bad.getSchedule().size() == 5);
@@ -586,18 +638,25 @@ static void testHashMap() {
 
     Graph graph;
     assert(graph.loadGraph("data/nodes.csv", "data/edges.csv"));
+    int academic = 0;
+    for (int id = 0; id < graph.getNodeCount(); ++id)
+        if (dynamic_cast<AcademicRoom*>(graph.getNode(id)) != nullptr)
+            ++academic;
     RoomAvailability rooms;
-    assert(rooms.buildFromGraph(graph) == 6);       // ids 2, 3, 4, 5, 6, 11
-    assert(rooms.hasRoom(2) && rooms.hasRoom(11));
-    assert(!rooms.hasRoom(0) && !rooms.hasRoom(7)); // transit / service nodes
-    assert(!rooms.hasRoom(99) && rooms.getMask(99) == -1);
-    ok("Loaded 6 AcademicRooms; non-academic and unknown ids are absent");
+    assert(rooms.buildFromGraph(graph) == academic);
+    const int d24 = idOf(graph, "D24");
+    assert(rooms.hasRoom(d24) && rooms.hasRoom(idOf(graph, "Lab 5")));
+    assert(!rooms.hasRoom(idOf(graph, "Main Gate")));            // transit
+    assert(!rooms.hasRoom(idOf(graph, "Library")));              // service
+    assert(!rooms.hasRoom(999) && rooms.getMask(999) == -1);
+    ok("Loaded every AcademicRoom; non-academic and unknown ids are absent");
 
-    // Academic Block A (2): busy "11010011" -> free slots 2, 4, 5.
-    assert(rooms.getMask(2) == 0b00110100);
-    assert(rooms.freeSlotCount(2) == 3);
-    assert(rooms.isFreeAtHour(2, 10) && !rooms.isFreeAtHour(2, 8));
-    assert(!rooms.isFreeAtHour(2, 16) && !rooms.isFreeSlot(2, -1));   // out of range
+    // D24 busy "00111001" -> busy slots 2,3,4,7 -> free slots 0,1,5,6
+    // -> mask = 1 + 2 + 32 + 64 = 99.
+    assert(rooms.getMask(d24) == 0b01100011);
+    assert(rooms.freeSlotCount(d24) == 4);
+    assert(rooms.isFreeAtHour(d24, 8) && !rooms.isFreeAtHour(d24, 10));
+    assert(!rooms.isFreeAtHour(d24, 16) && !rooms.isFreeSlot(d24, -1));   // out of range
     for (int id = 0; id < graph.getNodeCount(); ++id) {
         AcademicRoom* room = dynamic_cast<AcademicRoom*>(graph.getNode(id));
         if (room == nullptr) continue;
@@ -606,14 +665,24 @@ static void testHashMap() {
     }
     ok("Bitmask matches every AcademicRoom schedule slot");
 
-    std::vector<int> freeAt8 = rooms.freeRoomsAtHour(8);
-    assert(freeAt8.size() == 2 && freeAt8[0] == 3 && freeAt8[1] == 6);
-    std::cout << "  Free at 08:00:";
-    for (int id : freeAt8)
-        std::cout << " [" << id << "] " << graph.getNode(id)->getName() << ';';
-    std::cout << '\n';
-    assert(rooms.buildFromGraph(graph) == 6);       // rebuild does not duplicate
-    ok("freeRoomsAtHour lists free rooms; rebuilding does not duplicate");
+    // freeRoomsAtHour(h) lists exactly the academic rooms free at h, ascending.
+    for (int hour = 8; hour <= 15; ++hour) {
+        std::vector<int> freeNow = rooms.freeRoomsAtHour(hour);
+        int expected = 0;
+        for (int id = 0; id < graph.getNodeCount(); ++id) {
+            AcademicRoom* room = dynamic_cast<AcademicRoom*>(graph.getNode(id));
+            if (room != nullptr && room->isAvailableAtHour(hour)) ++expected;
+        }
+        assert(static_cast<int>(freeNow.size()) == expected && expected > 0);
+        for (std::size_t i = 0; i < freeNow.size(); ++i) {
+            assert(rooms.isFreeAtHour(freeNow[i], hour));
+            assert(i == 0 || freeNow[i - 1] < freeNow[i]);
+        }
+    }
+    std::cout << "  Free at 08:00: " << rooms.freeRoomsAtHour(8).size()
+              << " of " << academic << " rooms\n";
+    assert(rooms.buildFromGraph(graph) == academic);  // rebuild does not duplicate
+    ok("freeRoomsAtHour matches the schedules at every hour; rebuilding does not duplicate");
 }
 
 // ============================================================== BunkerRadar ===
@@ -626,50 +695,62 @@ static void testBunkerRadar() {
     rooms.buildFromGraph(graph);
     BunkerRadar radar(graph, rooms);
 
-    // Free-room lookup: at 08:00 only Academic Block B (3) and CS Lab Two (6).
-    std::vector<int> free8 = radar.findFreeRooms(8);
-    assert(free8.size() == 2 && free8[0] == 3 && free8[1] == 6);
-    ok("findFreeRooms(8) returns exactly rooms 3 and 6");
+    // findFreeRooms agrees with the availability table at every hour.
+    for (int hour = 8; hour <= 15; ++hour)
+        assert(radar.findFreeRooms(hour) == rooms.freeRoomsAtHour(hour));
+    ok("findFreeRooms(h) == freeRoomsAtHour(h) for every hour 08-15");
 
-    // Consecutive free hours and the score formula.
-    assert(radar.consecutiveFreeHours(6, 8) == 2);    // CS Lab Two free 08-10
-    assert(radar.consecutiveFreeHours(3, 14) == 2);   // free 14:00 and 15:00 (to 16:00)
-    assert(radar.consecutiveFreeHours(3, 9) == 0);    // busy at 09:00
-    assert(radar.consecutiveFreeHours(99, 8) == 0);   // unknown room
+    // Consecutive free hours (D24 free 08, 09, 13, 14) and the score formula.
+    const int d24 = idOf(graph, "D24");
+    assert(radar.consecutiveFreeHours(d24, 8) == 2);
+    assert(radar.consecutiveFreeHours(d24, 13) == 2);  // busy again at 15:00
+    assert(radar.consecutiveFreeHours(d24, 10) == 0);  // busy
+    assert(radar.consecutiveFreeHours(999, 8) == 0);   // unknown room
     assert(BunkerRadar::utilityScore(2, 50.0) == 15.0);
     assert(BunkerRadar::utilityScore(3, 100.0) == BunkerRadar::utilityScore(2, 0.0));  // 1h == 100m
     ok("consecutiveFreeHours and utilityScore follow the documented formula");
 
-    // An hour with free rooms: user at Central Plaza (1), 08:00.
-    //   CS Lab Two       2h, 95m -> 20 - 9.5 = 10.5
-    //   Academic Block B 1h, 65m -> 10 - 6.5 =  3.5
-    std::vector<BunkerResult> top = radar.topRooms(1, 8, 5);
-    assert(top.size() == 2);                           // only 2 free, even though N = 5
-    assert(top[0].roomId == 6 && top[0].name == "CS Lab Two");
-    assert(top[0].score == 10.5 && top[0].distance == 95.0 && top[0].freeHours == 2);
-    assert(top[1].roomId == 3 && top[1].score == 3.5 && top[1].distance == 65.0);
-    ok("08:00 from Central Plaza: closer room loses to longer free window");
-
-    // Ranking order with more candidates: 11:00 (rush hour) has 4 free rooms.
-    top = radar.topRooms(1, 11, 4);
-    assert(top.size() == 4);
-    for (size_t i = 1; i < top.size(); ++i)
-        assert(top[i - 1].score > top[i].score);       // strictly descending here
-    assert(top[0].roomId == 5 && top[1].roomId == 11 && top[2].roomId == 3 && top[3].roomId == 4);
-    std::cout << "  Top rooms at 11:00 from Central Plaza:\n";
+    // 11:00 from the CS Canteen: check every field against its definition and
+    // that no free room left out scores higher than the ones returned.
+    const int canteen = idOf(graph, "CS Canteen");
+    const double EPS  = 1e-9;
+    std::vector<double> dist = graph.dijkstraDistances(canteen, 11, false);
+    std::vector<BunkerResult> top = radar.topRooms(canteen, 11, 3);
+    assert(top.size() == 3);
+    for (std::size_t i = 0; i < top.size(); ++i) {
+        const BunkerResult& r = top[i];
+        assert(rooms.isFreeAtHour(r.roomId, 11));
+        assert(r.name == graph.getNode(r.roomId)->getName());
+        assert(std::abs(r.distance - dist[r.roomId]) < EPS);
+        assert(r.freeHours == radar.consecutiveFreeHours(r.roomId, 11));
+        assert(std::abs(r.score - BunkerRadar::utilityScore(r.freeHours, r.distance)) < EPS);
+        assert(i == 0 || top[i - 1].score >= top[i].score);  // descending
+    }
+    for (int id : radar.findFreeRooms(11)) {
+        bool chosen = false;
+        for (const BunkerResult& r : top)
+            if (r.roomId == id) chosen = true;
+        if (!chosen)
+            assert(BunkerRadar::utilityScore(radar.consecutiveFreeHours(id, 11), dist[id])
+                   <= top.back().score + EPS);
+    }
+    std::cout << "  Top rooms at 11:00 from CS Canteen:\n";
     for (const BunkerResult& b : top)
-        std::cout << "    [" << b.roomId << "] " << b.name << "  score=" << b.score
+        std::cout << "    " << b.name << " [" << graph.getNode(b.roomId)->getBuilding()
+                  << ", " << graph.getNode(b.roomId)->getFloor() << "]  score=" << b.score
                   << "  dist=" << b.distance << "m  free=" << b.freeHours << "h\n";
-    ok("11:00 ranking is strictly descending: 5 > 11 > 3 > 4");
+    ok("11:00 from CS Canteen: fields match their definitions, nothing better left out");
 
-    // Top-N truncation returns the best N, in the same order.
-    std::vector<BunkerResult> top2 = radar.topRooms(1, 11, 2);
-    assert(top2.size() == 2 && top2[0].roomId == 5 && top2[1].roomId == 11);
-    ok("topN = 2 returns the two highest-scoring rooms");
+    // Top-N truncation returns the best N scores, in the same order.
+    std::vector<BunkerResult> top2 = radar.topRooms(canteen, 11, 2);
+    assert(top2.size() == 2);
+    assert(std::abs(top2[0].score - top[0].score) < EPS);
+    assert(std::abs(top2[1].score - top[1].score) < EPS);
+    ok("topN = 2 returns the two highest scores");
 
     // No free rooms: hours outside 08-15, and a campus with no academic rooms.
-    assert(radar.findFreeRooms(7).empty() && radar.topRooms(1, 7, 3).empty());
-    assert(radar.findFreeRooms(16).empty() && radar.topRooms(1, 16, 3).empty());
+    assert(radar.findFreeRooms(7).empty() && radar.topRooms(canteen, 7, 3).empty());
+    assert(radar.findFreeRooms(16).empty() && radar.topRooms(canteen, 16, 3).empty());
     Graph noRooms;                                     // empty campus
     RoomAvailability noAvailability;
     assert(noAvailability.buildFromGraph(noRooms) == 0);
@@ -681,8 +762,8 @@ static void testBunkerRadar() {
     ok("No free rooms (hour outside 08-15 / no academic rooms) -> empty result");
 
     // Invalid inputs.
-    assert(radar.topRooms(1, 8, 0).empty());           // N = 0
-    assert(radar.topRooms(99, 8, 3).empty());          // unknown user node
+    assert(radar.topRooms(canteen, 8, 0).empty());     // N = 0
+    assert(radar.topRooms(999, 8, 3).empty());         // unknown user node
     assert(radar.topRooms(-1, 8, 3).empty());
     ok("topN <= 0 and invalid user node return empty");
 }
@@ -708,55 +789,46 @@ static void testPrefixTrie() {
     assert(trie.searchExact("Unknown Room") == -1);
     ok("searchExact: case-insensitive hits and miss verified");
 
-    // Autocomplete "eng" → should return both engineering entries.
     auto results = trie.autocomplete("eng");
-    std::cout << "  autocomplete(\"eng\"):\n";
-    for (auto& [name, id] : results)
-        std::cout << "    key=\"" << name << "\" id=" << id << '\n';
     assert(results.size() == 2);
-    ok("autocomplete(\"eng\") returned exactly 2 matches");
-
-    // Autocomplete "lect" → Lecture Hall A and B.
     results = trie.autocomplete("lect");
-    std::cout << "  autocomplete(\"lect\"):\n";
-    for (auto& [name, id] : results)
-        std::cout << "    key=\"" << name << "\" id=" << id << '\n';
     assert(results.size() == 2);
-    ok("autocomplete(\"lect\") returned exactly 2 matches");
-
-    // Autocomplete with no match.
-    results = trie.autocomplete("xyz");
-    assert(results.empty());
-    ok("autocomplete(\"xyz\") correctly returns empty");
-
-    // Autocomplete entire word (should return itself).
+    assert(trie.autocomplete("xyz").empty());
     results = trie.autocomplete("Library");
-    assert(results.size() == 1);
-    assert(results[0].second == 4);
-    ok("autocomplete full word returns exactly itself");
+    assert(results.size() == 1 && results[0].second == 4);
+    ok("autocomplete: prefix matches, no match, and full word");
 
-    // Digits and spaces are part of the key: "Lab 1" and "Lab 2" stay distinct.
+    // Digits, spaces and hyphens are part of the key.
     PrefixTrie labs;
     labs.insert("Lab 1", 21);
     labs.insert("Lab 2", 22);
     labs.insert("Lab 12", 23);
     labs.insert("Lab1", 24);                         // no space -> different key
+    labs.insert("Lab 10", 25);
+    labs.insert("LLC-1", 26);
+    labs.insert("LLC-2", 27);
+    labs.insert("R109", 28);
     assert(labs.searchExact("Lab 1") == 21);
-    assert(labs.searchExact("Lab 2") == 22);
+    assert(labs.searchExact("Lab 10") == 25);        // not confused with "Lab 1"
     assert(labs.searchExact("Lab 12") == 23);
     assert(labs.searchExact("Lab1") == 24);
     assert(labs.searchExact("Lab 3") == -1);
-    assert(labs.searchExact("LAB 1") == 21);         // still case-insensitive
+    assert(labs.searchExact("LAB 1") == 21);         // case-insensitive
     assert(labs.searchExact("  lab   2 ") == 22);    // extra whitespace collapses
     assert(labs.searchExact("Lab") == -1);           // prefix only, not a key
-    results = labs.autocomplete("lab 1");            // "lab 1" and "lab 12"
-    assert(results.size() == 2);
+    assert(labs.searchExact("llc-1") == 26 && labs.searchExact("LLC-2") == 27);
+    assert(labs.searchExact("LLC1") == -1);          // hyphen is significant
+    assert(labs.searchExact("r109") == 28);
+    results = labs.autocomplete("lab 1");            // "lab 1", "lab 10", "lab 12"
+    assert(results.size() == 3);
     results = labs.autocomplete("Lab ");             // trailing space trimmed -> "lab"
-    assert(results.size() == 4);
+    assert(results.size() == 5);
+    results = labs.autocomplete("llc-");
+    assert(results.size() == 2 && results[0].first == "llc-1");
     std::cout << "  autocomplete(\"lab 1\"):\n";
     for (auto& [name, id] : labs.autocomplete("lab 1"))
         std::cout << "    key=\"" << name << "\" id=" << id << '\n';
-    ok("\"Lab 1\" / \"Lab 2\" / \"Lab 12\" / \"Lab1\" stored and found separately");
+    ok("\"Lab 1\" / \"Lab 10\" / \"LLC-1\" / \"R109\" stored and found separately");
 }
 
 // ============================================== CampusNode OOP & Spatial Graph ===
@@ -768,170 +840,178 @@ static void testCampusGraph() {
     assert(loaded);
     ok("Loaded data/nodes.csv and data/edges.csv successfully");
 
-    int nodeCount = graph.getNodeCount();
-    assert(nodeCount == 15);
+    // 11 outdoor places + 11 floor hubs (EE 5, CS 3, MPB 3)
+    // + 61 rooms (EE 45, CS 13, MPB 3) = 83.
+    const int nodeCount = graph.getNodeCount();
+    assert(nodeCount == 83);
+    for (int i = 0; i < nodeCount; ++i)
+        assert(graph.getNode(i) != nullptr && graph.getNode(i)->getId() == i);
     std::cout << "  Total campus nodes loaded: " << nodeCount << '\n';
-    ok("Verified 15 campus locations");
+    ok("Verified 83 campus locations with dense ids");
 
-    // Verify OOP hierarchy on loaded nodes
-    CampusNode* n0 = graph.getNode(0);
-    assert(n0 != nullptr);
-    assert(n0->getType() == "TRANSIT");
-    assert(n0->getName() == "Main Gate");
-    ok("Node 0 is TransitNode (\"Main Gate\")");
+    CampusNode* gate = graph.getNode(idOf(graph, "Main Gate"));
+    assert(gate->getType() == "TRANSIT");
+    assert(gate->getBuilding() == "-" && gate->getFloor() == "-");
+    ok("Main Gate is an outdoor TransitNode");
 
-    CampusNode* n2 = graph.getNode(2);
-    assert(n2 != nullptr);
-    assert(n2->getType() == "ACADEMIC");
-    AcademicRoom* roomA = dynamic_cast<AcademicRoom*>(n2);
-    assert(roomA != nullptr);
-    // Schedule for node 2 is 11010011
-    assert(roomA->isSlotBusy(0) == true);
-    assert(roomA->isSlotBusy(1) == true);
-    assert(roomA->isSlotFree(2) == true);
-    assert(roomA->isSlotBusy(3) == true);
-    assert(roomA->isSlotFree(4) == true);
-    assert(roomA->isSlotFree(5) == true);
-    assert(roomA->isSlotBusy(6) == true);
-    assert(roomA->isSlotBusy(7) == true);
-    // Hour 10 is slot 2 (10 - 8 = 2) -> free
-    assert(roomA->isAvailableAtHour(10) == true);
-    // Hour 8 is slot 0 (8 - 8 = 0) -> busy
-    assert(roomA->isAvailableAtHour(8) == false);
-    ok("Node 2 is AcademicRoom with 8-slot schedule & availability helpers verified");
+    AcademicRoom* d24 = dynamic_cast<AcademicRoom*>(graph.getNode(idOf(graph, "D24")));
+    assert(d24 != nullptr);
+    assert(d24->getBuilding() == "EE" && d24->getFloor() == "D");
+    assert(d24->isAvailableAtHour(8) && !d24->isAvailableAtHour(10));
+    assert(d24->isSlotBusy(7) && d24->isSlotFree(6));
+    ok("D24 is an AcademicRoom on EE Floor D with its schedule loaded");
 
-    CampusNode* n7 = graph.getNode(7);
-    assert(n7 != nullptr);
-    assert(n7->getType() == "SERVICE");
-    ServiceFacility* lib = dynamic_cast<ServiceFacility*>(n7);
+    ServiceFacility* lib = dynamic_cast<ServiceFacility*>(graph.getNode(idOf(graph, "Library")));
     assert(lib != nullptr);
-    assert(lib->getCurrentQueue() >= 0);
-    assert(lib->getAvgServiceMinutes() > 0);
-    int wait = lib->getEstimatedWaitMinutes();
-    assert(wait == lib->getCurrentQueue() * lib->getAvgServiceMinutes());
-    ok("Node 7 is ServiceFacility with queue and wait time helpers verified");
+    assert(lib->getBuilding() == "MPB" && lib->getFloor() == "Basement");
+    assert(lib->getEstimatedWaitMinutes() == lib->getCurrentQueue() * lib->getAvgServiceMinutes());
+    ok("Library is a ServiceFacility in the MPB basement with queue helpers");
+
+    // ---- Structure of the 3D graph ----
+    section("Campus structure (floors, stairs, rooms)");
+    int stairs = 0;
+    for (int a = 0; a < nodeCount; ++a) {
+        const CampusNode* na = graph.getNode(a);
+        const bool indoorRoom = na->getBuilding() != "-" && na->getType() != "TRANSIT";
+        if (indoorRoom) {
+            // A room links only to its own floor hub.
+            assert(graph.getNeighbors(a).size() == 1);
+            const CampusNode* hub = graph.getNode(graph.getNeighbors(a)[0].to);
+            assert(hub->getType() == "TRANSIT");
+            assert(hub->getBuilding() == na->getBuilding() && hub->getFloor() == na->getFloor());
+            double d = graph.getNeighbors(a)[0].distance;
+            assert(d >= 5.0 && d <= 15.0);
+        }
+        for (const Edge& e : graph.getNeighbors(a)) {
+            const CampusNode* nb = graph.getNode(e.to);
+            const bool sameBuilding = na->getBuilding() != "-" && na->getBuilding() == nb->getBuilding();
+            assert(e.isOutdoor == !sameBuilding);           // indoor iff inside one building
+            if (sameBuilding && na->getFloor() != nb->getFloor()) {
+                assert(e.distance == 20.0 && e.rushMultiplier == 1.5);  // identical stairs
+                ++stairs;
+            }
+        }
+    }
+    assert(stairs / 2 == 8);       // EE A-B-C-D-E: 4, CS 2, MPB 2
+    for (int hour : {9, 12}) {
+        std::vector<double> d = graph.dijkstraDistances(idOf(graph, "Main Gate"), hour, false);
+        for (int i = 0; i < nodeCount; ++i)
+            assert(d[i] < std::numeric_limits<double>::infinity());
+    }
+    ok("Rooms hang off their floor hub (5-15 m); 8 identical 20 m stairs; all reachable");
 
     // ---- PrefixTrie Integration ----
     section("PrefixTrie Integrated with Campus Nodes");
     PrefixTrie campusTrie;
-    for (int i = 0; i < nodeCount; ++i) {
-        CampusNode* node = graph.getNode(i);
-        if (node) {
-            campusTrie.insert(node->getName(), node->getId());
-        }
-    }
-    assert(campusTrie.searchExact("Academic Block A") == 2);
-    assert(campusTrie.searchExact("library") == 7);
-    auto labMatches = campusTrie.autocomplete("cs");
-    assert(labMatches.size() == 2); // CS Lab One and CS Lab Two
-    std::cout << "  Prefix autocomplete(\"cs\") on loaded campus:\n";
-    for (auto& [k, id] : labMatches) {
-        std::cout << "    [" << id << "] " << graph.getNode(id)->getName() << '\n';
-    }
-    ok("PrefixTrie correctly indexes and autocompletes real campus locations");
+    for (int i = 0; i < nodeCount; ++i)
+        campusTrie.insert(graph.getNode(i)->getName(), i);
+    for (int i = 0; i < nodeCount; ++i)
+        assert(campusTrie.searchExact(graph.getNode(i)->getName()) == i);  // every name unique
+    assert(campusTrie.searchExact("d24") == idOf(graph, "D24"));
+    assert(campusTrie.autocomplete("lab 1").size() == 6);   // Lab 1, Lab 10-14
+    assert(campusTrie.autocomplete("llc").size() == 2);     // LLC-1, LLC-2
+    assert(campusTrie.autocomplete("ee floor").size() == 5);
+    std::cout << "  autocomplete(\"lab 1\") on the campus:\n";
+    for (auto& [k, id] : campusTrie.autocomplete("lab 1"))
+        std::cout << "    " << graph.getNode(id)->getName() << " ["
+                  << graph.getNode(id)->getBuilding() << ", " << graph.getNode(id)->getFloor() << "]\n";
+    ok("Every campus name is found exactly; digit, hyphen and floor prefixes work");
 
-    // ---- Dijkstra Pathfinding: Normal vs AvoidSun ----
-    section("Dijkstra: Normal vs Sun Avoidance (Heatwave Routing)");
-    // Route from Central Plaza (1) to Academic Block A (2)
-    // Direct outdoor edge: 1 -> 2 (distance = 60.0, isOutdoor = 1)
-    // Indoor route: 1 -> Main Corridor (12, 40m) -> Academic Block A (2, 25m) = 65m total
-    
-    // Normal query (avoidSun = false, morning hour 9)
-    PathResult normalRes = graph.dijkstra(1, 2, 9, false);
-    std::cout << "  Normal route (1 -> 2, avoidSun=false, hour=9):\n    Path: ";
-    for (int id : normalRes.path) std::cout << graph.getNode(id)->getName() << " (" << id << ") -> ";
-    std::cout << "Total Cost = " << normalRes.totalCost << "m\n";
-    assert(normalRes.path.size() == 2);
-    assert(normalRes.path[0] == 1 && normalRes.path[1] == 2);
-    assert(normalRes.totalCost == 60.0);
-    ok("Normal Dijkstra chooses direct outdoor path (60m)");
+    // ---- Dijkstra properties ----
+    section("Dijkstra on the 3D campus");
+    const double EPS = 1e-9;
+    const std::pair<const char*, const char*> trips[] = {
+        {"Main Gate", "Lab 2"}, {"D24", "Lab 4"}, {"Lab 14", "Cafe"},
+        {"Futsal Court", "Lab 6"}, {"R109", "Masjid"}};
+    for (const auto& [from, to] : trips)
+        for (int hour : {9, 12})
+            for (bool sun : {false, true}) {
+                int s = idOf(graph, from), t = idOf(graph, to);
+                PathResult r = graph.dijkstra(s, t, hour, sun);
+                assert(r.path.front() == s && r.path.back() == t);
+                assert(isWalkablePath(graph, r.path));
+                assert(std::abs(r.totalCost - pathCost(graph, r.path, hour, sun)) < EPS);
+                assert(std::abs(r.totalCost - graph.dijkstraDistances(s, hour, sun)[t]) < EPS);
+                if (sun)
+                    assert(r.totalCost >= graph.dijkstra(s, t, hour, false).totalCost - EPS);
+            }
+    ok("Paths start/end correctly, use real edges, cost = sum of edge weights");
 
-    // Sun avoidance query (avoidSun = true, morning hour 9)
-    // Direct path gets 2.5x penalty: 60 * 2.5 = 150m
-    // Indoor path via Main Corridor (12) stays 40 + 25 = 65m
-    PathResult shadedRes = graph.dijkstra(1, 2, 9, true);
-    std::cout << "  Shaded route (1 -> 2, avoidSun=true, hour=9):\n    Path: ";
-    for (int id : shadedRes.path) std::cout << graph.getNode(id)->getName() << " (" << id << ") -> ";
-    std::cout << "Total Cost = " << shadedRes.totalCost << "m\n";
-    assert(shadedRes.path.size() == 3);
-    assert(shadedRes.path[0] == 1 && shadedRes.path[1] == 12 && shadedRes.path[2] == 2);
-    assert(shadedRes.totalCost == 65.0);
-    ok("avoidSun=true reroutes via indoor corridors (Main Corridor, 65m vs 150m penalized)");
+    PathResult down = graph.dijkstra(idOf(graph, "D24"), idOf(graph, "Lab 4"), 9, false);
+    assert(stairsIn(graph, down.path) == 4);    // EE D -> A (3) + CS Ground -> Basement (1)
+    PathResult up = graph.dijkstra(idOf(graph, "Main Gate"), idOf(graph, "Lab 2"), 9, false);
+    assert(stairsIn(graph, up.path) == 1);      // CS Ground -> Floor 1
+    ok("Stairs count: D24 -> Lab 4 uses 4 flights, Main Gate -> Lab 2 uses 1");
 
-    // Rush hour query (currentHour = 12, peak 11-14)
-    // Direct path: 60 * 1.5 rushMultiplier = 90m
-    // Indoor path: 40 * 1.3 (52m) + 25 * 1.3 (32.5m) = 84.5m
-    PathResult rushRes = graph.dijkstra(1, 2, 12, false);
-    std::cout << "  Peak-hour route (1 -> 2, avoidSun=false, hour=12):\n    Path: ";
-    for (int id : rushRes.path) std::cout << graph.getNode(id)->getName() << " (" << id << ") -> ";
-    std::cout << "Total Cost = " << rushRes.totalCost << "m\n";
-    assert(rushRes.totalCost == 84.5);
-    ok("Peak hour multiplier (11-14) correctly adjusts edge weights");
+    // Hand calculation, Main Gate -> D24 (the only route):
+    //   Main Gate -> South Junction 150 m, -> EE Floor A 45 m,
+    //   3 flights of stairs A -> D 3 x 20 m, -> D24 7 m (3rd of 11 rooms: 5 + 10*2/10).
+    //   09:00: 150 + 45 + 60 + 7                       = 262.0
+    //   12:00: 150*1.2 + 45*1.2 + 60*1.5 + 7*1.4 = 180 + 54 + 90 + 9.8 = 333.8
+    PathResult toD24 = graph.dijkstra(idOf(graph, "Main Gate"), idOf(graph, "D24"), 9, false);
+    assert(std::abs(toD24.totalCost - 262.0) < EPS);
+    PathResult rushD24 = graph.dijkstra(idOf(graph, "Main Gate"), idOf(graph, "D24"), 12, false);
+    assert(std::abs(rushD24.totalCost - 333.8) < EPS);
+    std::cout << "  Main Gate -> D24: " << toD24.totalCost << " (09:00), "
+              << rushD24.totalCost << " (12:00 rush)\n";
+    ok("Main Gate -> D24 matches the hand calculation (262.0 / 333.8)");
 
     // ---- Squad-Sync Meetup Point ----
     section("Squad-Sync (3-User Collective Travel Optimization)");
-    // 3 students at different campus points:
-    // User 1: CS Lab One (5)
-    // User 2: EE Block (4)
-    // User 3: Cafeteria (9)
-    std::vector<int> squad = {5, 4, 9};
+    std::vector<int> squad = {idOf(graph, "D24"), idOf(graph, "Lab 2"), idOf(graph, "CS Canteen")};
     MeetupResult meetup = graph.findSquadMeetup(squad, 10, false);
-    assert(meetup.meetupNodeId >= 0);
-    std::cout << "  Squad members at:\n";
-    for (size_t i = 0; i < squad.size(); ++i) {
-        std::cout << "    User " << (i + 1) << ": " << graph.getNode(squad[i])->getName()
-                  << " (Cost to meetup: " << meetup.userCosts[i] << "m)\n";
+    assert(meetup.meetupNodeId >= 0 && meetup.userCosts.size() == squad.size());
+    std::vector<std::vector<double>> fromUser;
+    double sum = 0.0;
+    for (std::size_t i = 0; i < squad.size(); ++i) {
+        fromUser.push_back(graph.dijkstraDistances(squad[i], 10, false));
+        assert(std::abs(meetup.userCosts[i] - fromUser[i][meetup.meetupNodeId]) < EPS);
+        sum += meetup.userCosts[i];
     }
-    std::cout << "  Optimal Meetup Node: [" << meetup.meetupNodeId << "] "
-              << graph.getNode(meetup.meetupNodeId)->getName() << '\n';
-    std::cout << "  Total Collective Cost: " << meetup.totalCollectiveCost << "m\n";
-    ok("Squad-Sync identified optimal collective meetup vertex");
+    assert(std::abs(sum - meetup.totalCollectiveCost) < EPS);
+    for (int v = 0; v < nodeCount; ++v) {                     // no better meeting point
+        double total = 0.0;
+        for (const auto& d : fromUser) total += d[v];
+        assert(total >= meetup.totalCollectiveCost - EPS);
+    }
+    std::cout << "  D24 + Lab 2 + CS Canteen meet at "
+              << graph.getNode(meetup.meetupNodeId)->getName()
+              << " (total " << meetup.totalCollectiveCost << ")\n";
+    ok("Squad-Sync total = sum of user costs and no node is cheaper");
 
     // ---- Errand Optimization (Permutations) ----
     section("Errand Tour Optimization (Permutations)");
-    // Student starts at Main Gate (0), needs to visit Dhaba (8), Library (7), and Sports Room (10),
-    // and finish class at CS Lab Two (6).
-    int startNode = 0;
-    int endNode = 6;
-    std::vector<int> errands = {8, 7, 10};
-
+    const int startNode = idOf(graph, "Main Gate");
+    const int endNode   = idOf(graph, "Lab 2");
+    std::vector<int> errands = {idOf(graph, "Masjid"), idOf(graph, "Library"),
+                                idOf(graph, "Sports Room")};
     ErrandResult errandTour = graph.optimizeErrands(startNode, endNode, errands, 10, false);
-    assert(!errandTour.visitOrder.empty());
-    assert(errandTour.visitOrder.front() == startNode);
-    assert(errandTour.visitOrder.back() == endNode);
-
-    std::cout << "  Start: " << graph.getNode(startNode)->getName() << " (0)\n";
-    std::cout << "  End:   " << graph.getNode(endNode)->getName() << " (6)\n";
-    std::cout << "  Errands to visit: Dhaba (8), Library (7), Sports Room (10)\n";
+    assert(errandTour.visitOrder.size() == errands.size() + 2);
+    assert(errandTour.visitOrder.front() == startNode && errandTour.visitOrder.back() == endNode);
+    assert(errandTour.fullPath.front() == startNode && errandTour.fullPath.back() == endNode);
+    assert(isWalkablePath(graph, errandTour.fullPath));
+    double best = std::numeric_limits<double>::infinity();
+    for (int a = 0; a < 3; ++a)
+        for (int b = 0; b < 3; ++b)
+            for (int c = 0; c < 3; ++c) {
+                if (a == b || a == c || b == c) continue;
+                const int stops[] = {startNode, errands[a], errands[b], errands[c], endNode};
+                double total = 0.0;
+                for (int i = 0; i + 1 < 5; ++i)
+                    total += graph.dijkstraDistances(stops[i], 10, false)[stops[i + 1]];
+                if (total < best) best = total;
+            }
+    assert(std::abs(errandTour.totalCost - best) < EPS);
     std::cout << "  Optimal Visit Order:\n    ";
     for (size_t i = 0; i < errandTour.visitOrder.size(); ++i) {
-        std::cout << graph.getNode(errandTour.visitOrder[i])->getName()
-                  << " (" << errandTour.visitOrder[i] << ")";
+        std::cout << graph.getNode(errandTour.visitOrder[i])->getName();
         if (i + 1 < errandTour.visitOrder.size()) std::cout << " -> ";
     }
-    std::cout << "\n  Complete Step-by-Step Path:\n    ";
-    for (size_t i = 0; i < errandTour.fullPath.size(); ++i) {
-        std::cout << graph.getNode(errandTour.fullPath[i])->getName();
-        if (i + 1 < errandTour.fullPath.size()) std::cout << " -> ";
-    }
     std::cout << "\n  Total Tour Cost: " << errandTour.totalCost << "m\n";
-    ok("Errand tour tested permutations and produced shortest complete journey");
+    ok("Errand tour cost equals the best of all 6 orders; path is walkable");
 }
 
 // ============================================================ Speedrunner ===
-// True if every consecutive pair in 'path' is joined by an edge.
-static bool isWalkablePath(const Graph& g, const std::vector<int>& path) {
-    for (std::size_t i = 0; i + 1 < path.size(); ++i) {
-        bool linked = false;
-        for (const Edge& e : g.getNeighbors(path[i]))
-            if (e.to == path[i + 1])
-                linked = true;
-        if (!linked)
-            return false;
-    }
-    return true;
-}
-
 // Minutes for a fixed order, computed independently with one Dijkstra per
 // leg plus 15 min (queue 5 x 3 min) at each ServiceFacility errand.
 static double minutesForOrder(const Graph& g, int start, int end,
@@ -955,12 +1035,14 @@ static void testSpeedrunner() {
     const int BREAK_START = timeToMinutes("10:00");
     const int HOUR        = 10;
     const double EPS      = 1e-9;
+    const int start = idOf(graph, "D24");
+    const int end   = idOf(graph, "Lab 2");
 
-    // Feasible: Main Gate -> {Library, Cafeteria, CS Lab One, Sports Room}
-    // -> Academic Block A in a 60-minute break.
-    std::vector<int> errands{7, 9, 5, 10};
-    SpeedrunResult fit = planBreak(graph, 0, 2, errands,
-                                   BREAK_START, BREAK_START + 60, HOUR, false);
+    // Feasible: D24 -> {Masjid, CS Canteen, Library, Lab 5} -> Lab 2 in 90 min.
+    std::vector<int> errands{idOf(graph, "Masjid"), idOf(graph, "CS Canteen"),
+                             idOf(graph, "Library"), idOf(graph, "Lab 5")};
+    SpeedrunResult fit = planBreak(graph, start, end, errands,
+                                   BREAK_START, BREAK_START + 90, HOUR, false);
     assert(fit.feasible);
     assert(fit.visitOrder.size() == 4);
     for (int id : errands) {                                     // each once
@@ -969,44 +1051,44 @@ static void testSpeedrunner() {
             if (v == id) ++seen;
         assert(seen == 1);
     }
-    assert(fit.totalMinutes <= 60.0);
+    assert(fit.totalMinutes <= 90.0);
     assert(std::abs(fit.totalMinutes -
-                    minutesForOrder(graph, 0, 2, fit.visitOrder, HOUR)) < EPS);
-    assert(fit.fullPath.front() == 0 && fit.fullPath.back() == 2);
+                    minutesForOrder(graph, start, end, fit.visitOrder, HOUR)) < EPS);
+    assert(fit.fullPath.front() == start && fit.fullPath.back() == end);
     assert(isWalkablePath(graph, fit.fullPath));
     std::size_t at = 0;                                          // errands appear
     for (int id : fit.visitOrder) {                              // in visit order
         while (at < fit.fullPath.size() && fit.fullPath[at] != id) ++at;
         assert(at < fit.fullPath.size());
     }
-    ok("4 errands fit in 60 min; time matches an independent recount");
+    ok("4 errands fit in 90 min; time matches an independent recount");
 
     // Optimality: no other order of the same errands is faster.
-    std::vector<int> order = errands;
     for (int a = 0; a < 4; ++a)
         for (int b = 0; b < 4; ++b)
             for (int c = 0; c < 4; ++c)
                 for (int d = 0; d < 4; ++d) {
                     if (a == b || a == c || a == d || b == c || b == d || c == d)
                         continue;
-                    order = {errands[a], errands[b], errands[c], errands[d]};
+                    std::vector<int> order{errands[a], errands[b], errands[c], errands[d]};
                     assert(fit.totalMinutes <=
-                           minutesForOrder(graph, 0, 2, order, HOUR) + EPS);
+                           minutesForOrder(graph, start, end, order, HOUR) + EPS);
                 }
     ok("Chosen order is no slower than any of the 24 orders");
 
     std::cout << "  Plan (" << fit.totalMinutes << " min):";
-    for (int id : fit.fullPath)
-        std::cout << ' ' << id;
+    for (int id : fit.visitOrder)
+        std::cout << ' ' << graph.getNode(id)->getName();
     std::cout << '\n';
 
-    // Infeasible: Dhaba errand needs 15 min of queueing; break is 5 min.
-    SpeedrunResult shortBreak = planBreak(graph, 0, 2, {8},
+    // Infeasible: the Masjid errand alone needs 15 min of queueing; break is 5 min.
+    const int masjid = idOf(graph, "Masjid");
+    SpeedrunResult shortBreak = planBreak(graph, start, end, {masjid},
                                           BREAK_START, BREAK_START + 5, HOUR, false);
     assert(!shortBreak.feasible);
-    assert(shortBreak.totalMinutes > 5.0);                       // real time kept
-    assert(shortBreak.visitOrder.size() == 1 && shortBreak.visitOrder[0] == 8);
-    assert(shortBreak.fullPath.front() == 0 && shortBreak.fullPath.back() == 2);
+    assert(shortBreak.totalMinutes > 15.0);                      // real time kept
+    assert(shortBreak.visitOrder.size() == 1 && shortBreak.visitOrder[0] == masjid);
+    assert(shortBreak.fullPath.front() == start && shortBreak.fullPath.back() == end);
     assert(isWalkablePath(graph, shortBreak.fullPath));
     std::cout << "  5-min break: " << shortBreak.totalMinutes - 5.0
               << " minutes short\n";
@@ -1014,12 +1096,12 @@ static void testSpeedrunner() {
 
     // Invalid input: feasible=false, totalMinutes=-1, empty vectors.
     SpeedrunResult bad[] = {
-        planBreak(graph, 0, 2, {3, 4, 5, 6, 7}, BREAK_START, BREAK_START + 60, HOUR, false),
-        planBreak(graph, 0, 2, {99},            BREAK_START, BREAK_START + 60, HOUR, false),
-        planBreak(graph, 0, 2, {-1},            BREAK_START, BREAK_START + 60, HOUR, false),
-        planBreak(graph, 42, 2, {},             BREAK_START, BREAK_START + 60, HOUR, false),
-        planBreak(graph, 0, 2, {5, 5},          BREAK_START, BREAK_START + 60, HOUR, false),
-        planBreak(graph, 0, 2, {},              BREAK_START, BREAK_START,      HOUR, false),
+        planBreak(graph, start, end, {3, 4, 5, 6, 7}, BREAK_START, BREAK_START + 60, HOUR, false),
+        planBreak(graph, start, end, {999},           BREAK_START, BREAK_START + 60, HOUR, false),
+        planBreak(graph, start, end, {-1},            BREAK_START, BREAK_START + 60, HOUR, false),
+        planBreak(graph, 999, end, {},                BREAK_START, BREAK_START + 60, HOUR, false),
+        planBreak(graph, start, end, {masjid, masjid}, BREAK_START, BREAK_START + 60, HOUR, false),
+        planBreak(graph, start, end, {},              BREAK_START, BREAK_START,      HOUR, false),
     };
     for (const SpeedrunResult& r : bad) {
         assert(!r.feasible);
@@ -1029,17 +1111,17 @@ static void testSpeedrunner() {
     ok("Rejected: 5 errands, unknown/negative node, duplicate, empty break");
 
     // Zero errands: walk straight from start to end.
-    SpeedrunResult direct = planBreak(graph, 0, 2, {},
+    SpeedrunResult direct = planBreak(graph, start, end, {},
                                       BREAK_START, BREAK_START + 60, HOUR, false);
-    PathResult straight = graph.dijkstra(0, 2, HOUR, false);
+    PathResult straight = graph.dijkstra(start, end, HOUR, false);
     assert(direct.feasible);
     assert(direct.visitOrder.empty());
     assert(direct.fullPath == straight.path);
     assert(std::abs(direct.totalMinutes - straight.totalCost / 80.0) < EPS);
-    SpeedrunResult stay = planBreak(graph, 0, 0, {},
+    SpeedrunResult stay = planBreak(graph, start, start, {},
                                     BREAK_START, BREAK_START + 60, HOUR, false);
     assert(stay.feasible && stay.totalMinutes == 0.0);
-    assert(stay.fullPath.size() == 1 && stay.fullPath[0] == 0);
+    assert(stay.fullPath.size() == 1 && stay.fullPath[0] == start);
     ok("Zero errands: direct Dijkstra route; start == end costs 0 min");
 }
 
